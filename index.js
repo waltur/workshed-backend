@@ -25,3 +25,6 @@ app.use('/api/contacts', contactRoutes);
 
 const authRoutes = require('./routes/auth/auth');
 app.use('/api/auth', authRoutes);
+
+const roleRoutes = require('./routes/role/roles');
+app.use('/api/roles', roleRoutes);

@@ -6,38 +6,35 @@ const jwt = require('jsonwebtoken');
 
 
 const register = async (req, res) => {
-  const { username, email, password } = req.body;
-console.log("register");
+  const { name, phone_number, email, username, password, roles } = req.body;
+
   try {
-    // Verifica si ya existe
-    const existing = await pool.query('SELECT id_user FROM auth.users WHERE email = $1', [email]);
-    if (existing.rows.length > 0) {
-      return res.status(409).json({ error: 'Email already in use' });
-    }
-
-    const hash = await bcrypt.hash(password, 10);
-
-    const userResult = await pool.query(
-      `INSERT INTO auth.users (username, email, password_hash)
-       VALUES ($1, $2, $3)
-       RETURNING id_user, username, email`,
-      [username, email, hash]
+    // 1. Crear contacto
+    const contactResult = await pool.query(
+      `INSERT INTO contacts.contacts (name, email, phone_number, type)
+       VALUES ($1, $2, $3, $4) RETURNING id_contact`,
+      [name, email, phone_number, 'Person']
     );
+    const id_contact = contactResult.rows[0].id_contact;
 
+    // 2. Crear usuario
+    const hash = await bcrypt.hash(password, 10);
+    const userResult = await pool.query(
+      `INSERT INTO auth.users (username, email, password_hash, id_contact)
+       VALUES ($1, $2, $3, $4) RETURNING id_user`,
+      [username, email, hash, id_contact]
+    );
     const userId = userResult.rows[0].id_user;
 
-    // Buscar ID del rol 'volunteer'
-    const roleResult = await pool.query(`SELECT id_role FROM auth.roles WHERE role_name = 'volunteer'`);
-    const roleId = roleResult.rows[0]?.id_role;
-
-    if (roleId) {
+    // 3. Asignar roles
+    for (const roleId of roles) {
       await pool.query(
         `INSERT INTO auth.user_roles (id_user, id_role) VALUES ($1, $2)`,
         [userId, roleId]
       );
     }
 
-    res.status(201).json(userResult.rows[0]);
+    res.status(201).json({ message: 'User created successfully' });
   } catch (err) {
     console.error('Register error:', err);
     res.status(500).json({ error: 'Registration failed' });
@@ -89,5 +86,27 @@ console.info("login");
     return res.status(500).json({ error: 'Login failed' });
   }
 };
+const checkEmailExists = async (req, res) => {
+  const { email } = req.query;
+  try {
+    const result = await pool.query('SELECT 1 FROM auth.users WHERE email = $1', [email]);
+    const exists = result.rows.length > 0;
+    res.json({ exists });
+  } catch (err) {
+    console.error('Check email error:', err);
+    res.status(500).json({ error: 'Server error checking email' });
+  }
+};
+const checkUsernameExists = async (req, res) => {
+  const { username } = req.query;
+  try {
+    const result = await pool.query('SELECT 1 FROM auth.users WHERE username = $1', [username]);
+    const exists = result.rows.length > 0;
+    res.json({ exists });
+  } catch (err) {
+    console.error('Check username error:', err);
+    res.status(500).json({ error: 'Server error checking username' });
+  }
+};
 
-module.exports = { register, login };
+module.exports = { register, login, checkEmailExists, checkUsernameExists };

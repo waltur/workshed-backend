@@ -28,3 +28,6 @@ app.use('/api/auth', authRoutes);
 
 const roleRoutes = require('./routes/role/roles');
 app.use('/api/roles', roleRoutes);
+
+const jobRoleRoutes = require('./routes/jobRole/jobRoles');
+app.use('/api/job-roles', jobRoleRoutes);

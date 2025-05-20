@@ -6,7 +6,7 @@ const jwt = require('jsonwebtoken');
 
 
 const register = async (req, res) => {
-  const { name, phone_number, email, username, password, roles } = req.body;
+  const { name, phone_number, email, username, password, roles, job_roles = [] } = req.body;
 
   try {
     // 1. Crear contacto
@@ -32,6 +32,20 @@ const register = async (req, res) => {
         `INSERT INTO auth.user_roles (id_user, id_role) VALUES ($1, $2)`,
         [userId, roleId]
       );
+    }
+    const hasVolunteerRole = roles.some(roleId => {
+      return pool.query(`SELECT role_name FROM auth.roles WHERE id_role = $1`, [roleId])
+        .then(res => res.rows[0]?.name === 'volunteer');
+    });
+
+    if (hasVolunteerRole && job_roles.length > 0) {
+      for (const jobId of job_roles) {
+        await pool.query(
+          `INSERT INTO contacts.contact_job_role (id_contact, id_job_role)
+           VALUES ($1, $2)`,
+          [id_contact, jobId]
+        );
+      }
     }
 
     res.status(201).json({ message: 'User created successfully' });
@@ -108,5 +122,9 @@ const checkUsernameExists = async (req, res) => {
     res.status(500).json({ error: 'Server error checking username' });
   }
 };
+
+
+
+
 
 module.exports = { register, login, checkEmailExists, checkUsernameExists };

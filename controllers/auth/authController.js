@@ -1,6 +1,10 @@
 const pool = require('../../db');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const { v4: uuidv4 } = require('uuid');
+// Secretos
+const ACCESS_TOKEN_SECRET = process.env.JWT_SECRET;
+const REFRESH_TOKEN_SECRET = process.env.JWT_REFRESH_SECRET;
 
 
 
@@ -20,9 +24,9 @@ const register = async (req, res) => {
     // 2. Crear usuario
     const hash = await bcrypt.hash(password, 10);
     const userResult = await pool.query(
-      `INSERT INTO auth.users (username, email, password_hash, id_contact)
-       VALUES ($1, $2, $3, $4) RETURNING id_user`,
-      [username, email, hash, id_contact]
+      `INSERT INTO auth.users (username, email, password_hash, id_contact, is_active)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id_user`,
+      [username, email, hash, id_contact,'1']
     );
     const userId = userResult.rows[0].id_user;
 
@@ -55,50 +59,83 @@ const register = async (req, res) => {
   }
 };
 
+// Login
 const login = async (req, res) => {
-console.info("login");
+console.log("login");
   const { email, password } = req.body;
 
   try {
-    const result = await pool.query(
-      'SELECT * FROM auth.users WHERE email = $1',
-      [email]
-    );
+    const result = await pool.query(`SELECT * FROM auth.users WHERE email = $1`, [email]);
     const user = result.rows[0];
-    if (!user) {
-      return res.status(401).json({ error: 'Invalid credentials' }); // ✅
-    }
+
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
 
     const match = await bcrypt.compare(password, user.password_hash);
-    if (!match) {
-      return res.status(401).json({ error: 'Invalid credentials' }); // ✅
-    }
+    if (!match) return res.status(401).json({ error: 'Invalid credentials' });
 
-    const rolesResult = await pool.query(
-      `SELECT r.role_name FROM auth.roles r
-       JOIN auth.user_roles ur ON ur.id_role = r.id_role
-       WHERE ur.id_user = $1`,
-      [user.id_user]
+    const userRoles = await getUserRoles(user.id_user); // devuelve ['admin'] o ['volunteer']
+
+    const accessToken = jwt.sign(
+      { id: user.id_user, username: user.username, email: user.email, roles: userRoles },
+      ACCESS_TOKEN_SECRET,
+      { expiresIn: '15m' }
     );
 
-    const roles = rolesResult.rows.map(r => r.role_name);
-
-    const token = jwt.sign(
-      {
-        userId: user.id_user,
-        username: user.username,
-        email: user.email,
-        roles
-      },
-      'your_jwt_secret',
-      { expiresIn: '1h' }
+    const refreshToken = jwt.sign(
+      { id: user.id_user },
+      REFRESH_TOKEN_SECRET,
+      { expiresIn: '7d' }
     );
 
-    return res.json({ token }); // ✅ importante usar `return`
+    await pool.query(
+      `INSERT INTO auth.refresh_tokens (user_id, token) VALUES ($1, $2)`,
+      [user.id_user, refreshToken]
+    );
+
+    res.json({ accessToken, refreshToken });
   } catch (err) {
     console.error('Login error:', err);
-    return res.status(500).json({ error: 'Login failed' });
+    res.status(500).json({ error: 'Login failed' });
   }
+};
+
+const refreshToken = async (req, res) => {
+  const { token } = req.body;
+
+  if (!token) return res.status(401).json({ error: 'Missing token' });
+
+  try {
+    const stored = await pool.query(
+      `SELECT * FROM auth.refresh_tokens WHERE token = $1`,
+      [token]
+    );
+
+    if (stored.rowCount === 0) return res.status(403).json({ error: 'Invalid token' });
+
+    const payload = jwt.verify(token, REFRESH_TOKEN_SECRET);
+
+    const roles = await getUserRoles(payload.id);
+    const newAccessToken = jwt.sign(
+      { id: payload.id, username: payload.username, email: payload.email, roles },
+      ACCESS_TOKEN_SECRET,
+      { expiresIn: '15m' }
+    );
+
+    res.json({ accessToken: newAccessToken });
+  } catch (err) {
+    console.error('Refresh token error:', err);
+    res.status(403).json({ error: 'Invalid or expired refresh token' });
+  }
+};
+const getUserRoles = async (userId) => {
+  const result = await pool.query(`
+    SELECT r.role_name
+    FROM auth.user_roles ur
+    JOIN auth.roles r ON ur.id_role = r.id_role
+    WHERE ur.id_user = $1
+  `, [userId]);
+
+  return result.rows.map(row => row.role_name);
 };
 const checkEmailExists = async (req, res) => {
   const { email } = req.query;
@@ -127,4 +164,4 @@ const checkUsernameExists = async (req, res) => {
 
 
 
-module.exports = { register, login, checkEmailExists, checkUsernameExists };
+module.exports = { register, login, checkEmailExists, checkUsernameExists,refreshToken };

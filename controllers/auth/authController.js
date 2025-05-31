@@ -74,9 +74,10 @@ console.log("login");
     if (!match) return res.status(401).json({ error: 'Invalid credentials' });
 
     const userRoles = await getUserRoles(user.id_user); // devuelve ['admin'] o ['volunteer']
+    const jobRoles = await getUserJobRoles(user.id_user);
 
     const accessToken = jwt.sign(
-      { id: user.id_user, username: user.username, email: user.email, roles: userRoles },
+      { id: user.id_user, username: user.username, email: user.email,contact_id: user.id_contact, roles: userRoles, job_roles: jobRoles },
       ACCESS_TOKEN_SECRET,
       { expiresIn: '15m' }
     );
@@ -136,6 +137,17 @@ const getUserRoles = async (userId) => {
   `, [userId]);
 
   return result.rows.map(row => row.role_name);
+};
+const getUserJobRoles = async (id_user) => {
+  const result = await pool.query(`
+    SELECT jr.title
+    FROM contacts.contact_job_role cjr
+    JOIN contacts.job_roles jr ON cjr.id_job_role = jr.id_job_role
+    JOIN auth.users u ON u.id_contact = cjr.id_contact
+    WHERE u.id_user = $1
+  `, [id_user]);
+
+  return result.rows.map(row => row.title);
 };
 const checkEmailExists = async (req, res) => {
   const { email } = req.query;

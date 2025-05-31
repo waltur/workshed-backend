@@ -34,3 +34,15 @@ app.use('/api/job-roles', jobRoleRoutes);
 
 const adminRoutes = require('./routes/admin/admin');
 app.use('/api/admin', adminRoutes);
+
+const groupRoutes = require('./routes/groupManagement/groups');
+app.use('/api/groups', groupRoutes);
+
+const eventRoutes = require('./routes/groupManagement/events');
+app.use('/api/group-events', eventRoutes);
+
+const timesheetRoutes = require('./routes/groupManagement/timesheets');
+app.use('/api/group-timesheets', timesheetRoutes);
+
+const participationRoutes = require('./routes/groupManagement/participation');
+app.use('/api/group-participation', participationRoutes);

@@ -59,25 +59,36 @@ const register = async (req, res) => {
   }
 };
 
-// Login
 const login = async (req, res) => {
-console.log("login");
+  console.log("login");
+
   const { email, password } = req.body;
 
   try {
     const result = await pool.query(`SELECT * FROM auth.users WHERE email = $1`, [email]);
     const user = result.rows[0];
 
-    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+ if (!user) {
+   return res.status(401).type('application/json').json({ message: 'Invalid credentials' });
+ }
 
-    const match = await bcrypt.compare(password, user.password_hash);
-    if (!match) return res.status(401).json({ error: 'Invalid credentials' });
+ const match = await bcrypt.compare(password, user.password_hash);
+ if (!match) {
+   return res.status(401).type('application/json').json({ message: 'Invalid credentials' });
+ }
 
-    const userRoles = await getUserRoles(user.id_user); // devuelve ['admin'] o ['volunteer']
-    const jobRoles = await getUserJobRoles(user.id_user);
+    const userRoles = await getUserRoles(user.id_user); // e.g., ['admin']
+    const jobRoles = await getUserJobRoles(user.id_user); // e.g., ['Leader']
 
     const accessToken = jwt.sign(
-      { id: user.id_user, username: user.username, email: user.email,contact_id: user.id_contact, roles: userRoles, job_roles: jobRoles },
+      {
+        id: user.id_user,
+        username: user.username,
+        email: user.email,
+        contact_id: user.id_contact,
+        roles: userRoles,
+        job_roles: jobRoles
+      },
       ACCESS_TOKEN_SECRET,
       { expiresIn: '15m' }
     );
@@ -93,10 +104,11 @@ console.log("login");
       [user.id_user, refreshToken]
     );
 
-    res.json({ accessToken, refreshToken });
+    res.status(200).json({ accessToken, refreshToken });
+
   } catch (err) {
     console.error('Login error:', err);
-    res.status(500).json({ error: 'Login failed' });
+    res.status(500).json({ message: 'Login failed due to server error' });
   }
 };
 
@@ -172,8 +184,29 @@ const checkUsernameExists = async (req, res) => {
   }
 };
 
+const changePassword = async (req, res) => {
+  console.log("changePassword");
+  const userId = req.user?.id_user; // Debes proteger esta ruta con middleware JWT
+  const { currentPassword, newPassword } = req.body;
+
+  try {
+    const userResult = await pool.query(`SELECT password_hash FROM auth.users WHERE id_user = $1`, [userId]);
+    const user = userResult.rows[0];
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const match = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!match) return res.status(401).json({ message: 'Current password is incorrect' });
+
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await pool.query(`UPDATE auth.users SET password_hash = $1 WHERE id_user = $2`, [newHash, userId]);
+
+    res.json({ message: 'Password updated successfully' });
+  } catch (err) {
+    console.error('Password update error:', err);
+    res.status(500).json({ message: 'Failed to update password' });
+  }
+};
 
 
 
-
-module.exports = { register, login, checkEmailExists, checkUsernameExists,refreshToken };
+module.exports = { register, login, checkEmailExists, checkUsernameExists,refreshToken, changePassword };

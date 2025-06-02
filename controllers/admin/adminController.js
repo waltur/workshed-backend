@@ -45,19 +45,22 @@ const activateUser = async (req, res) => {
     res.status(500).json({ error: 'Failed to activate user' });
   }
 };
+
+
 const getUserById = async (req, res) => {
   const userId = req.params.id;
 
   try {
     // 1. Obtener datos del usuario con roles
     const userResult = await pool.query(`
-      SELECT u.id_user, u.username, u.email, u.is_active, u.id_contact,
+      SELECT c.name, c.phone_number, u.id_user, u.username, u.email, u.is_active, u.id_contact,
         ARRAY_AGG(r.role_name) AS roles
       FROM auth.users u
       LEFT JOIN auth.user_roles ur ON u.id_user = ur.id_user
       LEFT JOIN auth.roles r ON ur.id_role = r.id_role
+      LEFT JOIN contacts.contacts c ON c.id_contact = u.id_contact
       WHERE u.id_user = $1
-      GROUP BY u.id_user
+      GROUP BY u.id_user, c.name, c.phone_number
     `, [userId]);
 
     if (userResult.rowCount === 0) {
@@ -80,6 +83,8 @@ const getUserById = async (req, res) => {
     res.json({
       id_user: user.id_user,
       username: user.username,
+      name: user.name,
+      phone_number:user.phone_number,
       email: user.email,
       is_active: user.is_active,
       roles: user.roles,
@@ -93,7 +98,7 @@ const getUserById = async (req, res) => {
 };
 
 const createUser = async (req, res) => {
-  const { username, email, password, roles = [], job_roles = [] } = req.body;
+  const { name, phone_number, username, email, password, roles = [], job_roles = [] } = req.body;
 
   try {
     // Validar email único
@@ -109,9 +114,9 @@ const createUser = async (req, res) => {
 
     // 🔐 Crear contacto mínimo para asociar job_roles
     const contactResult = await pool.query(`
-      INSERT INTO contacts.contacts (name, email, type)
-      VALUES ($1, $2, 'Person') RETURNING id_contact
-    `, [username, email]);
+      INSERT INTO contacts.contacts (name, email,phone_number, type)
+      VALUES ($1, $2,$3, 'Person') RETURNING id_contact
+    `, [name, email,phone_number]);
 
     const id_contact = contactResult.rows[0].id_contact;
 
@@ -152,62 +157,70 @@ const createUser = async (req, res) => {
 };
 
 const updateUser = async (req, res) => {
-console.log("updateUser");
+  console.log("updateUser");
   const userId = req.params.id;
-  const { username, email, roles = [], job_roles = [] } = req.body;
+  const { name, phone_number, username, email, roles = [], job_roles = [] } = req.body;
 
   try {
-    // Verificar que el email no esté en uso por otro usuario
+    // 🔍 Verificar que el email no esté en uso por otro usuario
     const existing = await pool.query(
       `SELECT 1 FROM auth.users WHERE email = $1 AND id_user != $2`,
       [email, userId]
     );
-    if (existing.rowCount > 0) return res.status(409).json({ error: 'Email is already in use' });
+    if (existing.rowCount > 0) {
+      return res.status(409).json({ message: 'Email is already in use' });
+    }
 
-    // 🔄 Actualizar datos básicos del usuario
+    // 🔄 Actualizar tabla auth.users
     await pool.query(`
       UPDATE auth.users SET username = $1, email = $2 WHERE id_user = $3
     `, [username, email, userId]);
 
-    // 🔄 Reemplazar roles
+    // 🔄 Reemplazar roles en auth.user_roles
     await pool.query(`DELETE FROM auth.user_roles WHERE id_user = $1`, [userId]);
     for (const roleId of roles) {
       await pool.query(`INSERT INTO auth.user_roles (id_user, id_role) VALUES ($1, $2)`, [userId, roleId]);
     }
 
-    // 🔄 Obtener el id_contact vinculado al usuario
+    // 🔍 Obtener id_contact del usuario
     const userResult = await pool.query(`SELECT id_contact FROM auth.users WHERE id_user = $1`, [userId]);
     const id_contact = userResult.rows[0]?.id_contact;
 
     if (!id_contact) {
-      return res.status(400).json({ error: 'User does not have a linked contact' });
+      return res.status(400).json({ message: 'User does not have a linked contact' });
     }
 
-    // 🔍 Verificar si el rol 'volunteer' está seleccionado
+    // 🔄 Actualizar tabla contacts.contacts
+    await pool.query(`
+      UPDATE contacts.contacts
+      SET name = $1, phone_number = $2, email = $3
+      WHERE id_contact = $4
+    `, [name, phone_number, email, id_contact]);
+
+    // 🔍 Verificar si es volunteer
     const volunteerRoleIdResult = await pool.query(
       `SELECT id_role FROM auth.roles WHERE LOWER(role_name) = 'volunteer'`
     );
     const volunteerRoleId = volunteerRoleIdResult.rows[0]?.id_role;
     const isVolunteer = roles.includes(volunteerRoleId);
 
-    // 🧹 Eliminar funciones anteriores
+    // 🧹 Eliminar job_roles anteriores
     await pool.query(`DELETE FROM contacts.contact_job_role WHERE id_contact = $1`, [id_contact]);
 
-    // ✅ Si es volunteer, agregar los nuevos job_roles
+    // ✅ Insertar job_roles si es volunteer
     if (isVolunteer && job_roles.length > 0) {
       for (const jobId of job_roles) {
-        await pool.query(
-          `INSERT INTO contacts.contact_job_role (id_contact, id_job_role)
-           VALUES ($1, $2)`,
-          [id_contact, jobId]
-        );
+        await pool.query(`
+          INSERT INTO contacts.contact_job_role (id_contact, id_job_role)
+          VALUES ($1, $2)
+        `, [id_contact, jobId]);
       }
     }
 
     res.json({ message: 'User updated successfully' });
   } catch (err) {
     console.error('Error updating user:', err);
-    res.status(500).json({ error: 'Failed to update user' });
+    res.status(500).json({ message: 'Failed to update user' });
   }
 };
 

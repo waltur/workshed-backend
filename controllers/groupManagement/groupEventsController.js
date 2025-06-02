@@ -50,11 +50,11 @@ const getAllEvents = async (req, res) => {
       CASE WHEN EXISTS (
         SELECT 1 FROM group_management.event_attendees a
         WHERE a.id_event = e.id_event AND a.id_contact = $1
-      ) THEN 'Student' ELSE NULL END AS is_attending,
+      ) THEN 'Attendant' ELSE NULL END AS is_attending,
       CASE WHEN EXISTS (
         SELECT 1 FROM group_management.event_instructors i
         WHERE i.id_event = e.id_event AND i.id_contact = $1
-      ) THEN 'Instructor' ELSE NULL END AS is_instructor,
+      ) THEN 'Coordinator' ELSE NULL END AS is_instructor,
       CASE WHEN EXISTS (
         SELECT 1 FROM group_management.event_helpers h
         WHERE h.id_event = e.id_event AND h.id_contact = $1

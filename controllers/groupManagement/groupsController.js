@@ -26,12 +26,12 @@ const getGroupById = async (req, res) => {
 
 // Crear un nuevo grupo
 const createGroup = async (req, res) => {
-  const { name, description, category } = req.body;
+  const { name, description, category, image  } = req.body;
   try {
     const result = await pool.query(`
-      INSERT INTO group_management.groups (name, description, category)
-      VALUES ($1, $2, $3) RETURNING *`,
-      [name, description, category]
+      INSERT INTO group_management.groups (name, description, category, image )
+      VALUES ($1, $2, $3,$4) RETURNING *`,
+      [name, description, category, image ]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {

@@ -186,7 +186,7 @@ const checkUsernameExists = async (req, res) => {
 
 const changePassword = async (req, res) => {
   console.log("changePassword");
-  const userId = req.user?.id_user; // Debes proteger esta ruta con middleware JWT
+  const userId = req.user?.id; // Debes proteger esta ruta con middleware JWT
   const { currentPassword, newPassword } = req.body;
 
   try {

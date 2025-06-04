@@ -2,9 +2,12 @@ const pool = require('../../db');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 // Secretos
 const ACCESS_TOKEN_SECRET = process.env.JWT_SECRET;
 const REFRESH_TOKEN_SECRET = process.env.JWT_REFRESH_SECRET;
+const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
 
 
 
@@ -207,6 +210,84 @@ const changePassword = async (req, res) => {
   }
 };
 
+const forgotPassword = async (req, res) => {
+console.log("forgotPassword");
+  const { email } = req.body;
+
+  try {
+    const result = await pool.query(`SELECT id_user FROM auth.users WHERE email = $1`, [email]);
+    const user = result.rows[0];
+
+    if (!user) {
+      return res.status(404).json({ message: 'No user found with this email' });
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
+
+    await pool.query(`
+      INSERT INTO auth.password_resets (user_id, token, expires_at)
+      VALUES ($1, $2, $3)
+    `, [user.id_user, token, expiresAt]);
+
+    //const resetLink = `http://localhost:4200/login/reset-password?token=${token}`;
+    //const resetLink = `${frontendUrl}/login/reset-password?token=${token}`;
+    const resetLink = `${frontendUrl}/login/reset-password/${token}`;
 
 
-module.exports = { register, login, checkEmailExists, checkUsernameExists,refreshToken, changePassword };
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS // O usa variables de entorno
+      }
+    });
+
+    await transporter.sendMail({
+      to: email,
+      subject: 'Reset your password',
+      html: `<p>Click here to reset your password: <a href="${resetLink}">${resetLink}</a></p>`
+    });
+
+    res.json({ message: 'Password reset link sent to email' });
+  } catch (err) {
+    console.error('Error in forgotPassword:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+const resetPassword = async (req, res) => {
+  const { token, newPassword } = req.body;
+
+  try {
+    const result = await pool.query(`
+      SELECT * FROM auth.password_resets
+      WHERE token = $1 AND used = FALSE AND expires_at > NOW()
+    `, [token]);
+
+    const resetRecord = result.rows[0];
+    if (!resetRecord) {
+      return res.status(400).json({ message: 'Invalid or expired token' });
+    }
+
+    const newHash = await bcrypt.hash(newPassword, 10);
+
+    await pool.query(`
+      UPDATE auth.users
+      SET password_hash = $1
+      WHERE id_user = $2
+    `, [newHash, resetRecord.user_id]);
+
+    await pool.query(`
+      UPDATE auth.password_resets
+      SET used = TRUE
+      WHERE id = $1
+    `, [resetRecord.id]);
+
+    res.json({ message: 'Password has been reset successfully' });
+  } catch (err) {
+    console.error('Error in resetPassword:', err);
+    res.status(500).json({ message: 'Server error during password reset' });
+  }
+};
+
+module.exports = { register, login, checkEmailExists, checkUsernameExists,refreshToken, changePassword, forgotPassword, resetPassword };

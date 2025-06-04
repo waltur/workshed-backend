@@ -43,13 +43,13 @@ const createGroup = async (req, res) => {
 // Actualizar grupo
 const updateGroup = async (req, res) => {
   const id = req.params.id;
-  const { name, description, category, is_active } = req.body;
+  const { name, description, category, is_active,image } = req.body;
   try {
     await pool.query(`
       UPDATE group_management.groups
-      SET name = $1, description = $2, category = $3, is_active = $4
+      SET name = $1, description = $2, category = $3, is_active = $4, image=$6
       WHERE id_group = $5`,
-      [name, description, category, is_active, id]
+      [name, description, category, is_active, id, image]
     );
     res.json({ message: 'Group updated successfully' });
   } catch (err) {

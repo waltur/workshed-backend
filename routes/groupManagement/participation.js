@@ -5,6 +5,6 @@ const ctrl = require('../../controllers/groupManagement/groupEventParticipationC
 router.post('/attendee', ctrl.registerAttendee);
 router.post('/instructor', ctrl.registerInstructor);
 router.post('/helper', ctrl.registerHelper);
-
+router.get('/group-roles', ctrl.getGroupRoles);
 
 module.exports = router;

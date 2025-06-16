@@ -2,19 +2,23 @@
 const pool = require('../../db');
 // Crear evento
 const createEvent = async (req, res) => {
-  const { id_group, title, description, start, end } = req.body;
+  const { id_group, title, description, start, end, location } = req.body;
 
   if (!id_group || !title || !start) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
   try {
-   await pool.query(`
-     INSERT INTO group_management.group_events (id_group, title, description, start, "end", event_date)
-     VALUES ($1, $2, $3, $4, $5, $6)
-   `, [id_group, title, description, start, end, start]);
+    const result = await pool.query(
+      `
+      INSERT INTO group_management.group_events (id_group, title, description, start, "end", event_date,location)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *
+      `,
+      [id_group, title, description, start, end, start,location]
+    );
 
-    res.status(201).json({ message: 'Event created successfully' });
+    res.status(201).json(result.rows[0]); // ⬅️ Ahora devuelve el evento creado con su id_event
   } catch (err) {
     console.error('Error creating event:', err);
     res.status(500).json({ error: 'Failed to create event' });
@@ -28,7 +32,7 @@ const getEventsByGroup = async (req, res) => {
     const result = await pool.query(`
       SELECT * FROM group_management.group_events WHERE id_group = $1 ORDER BY event_date DESC
     `, [groupId]);
-    res.json(result.rows);
+    res.json(result.rows[0]);
   } catch (err) {
     console.error('Error fetching events:', err);
     res.status(500).json({ error: 'Failed to fetch events' });
@@ -46,6 +50,7 @@ const getAllEvents = async (req, res) => {
       e.description,
       e.start,
       e."end",
+      e.location,
       g.name,
       CASE WHEN EXISTS (
         SELECT 1 FROM group_management.event_attendees a
@@ -73,6 +78,7 @@ const getAllEvents = async (req, res) => {
       description: row.description,
       start: row.start,
       end: row.end,
+      location:row.location,
       group_name: row.name,
       registration_roles: [
         row.is_attending,
@@ -87,5 +93,57 @@ const getAllEvents = async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
+const deleteEvent = async (req, res) => {
+  const { id } = req.params;
 
-module.exports = { createEvent, getEventsByGroup, getAllEvents };
+  try {
+    const result = await pool.query(
+      `DELETE FROM group_management.group_events WHERE id_event = $1 RETURNING *`,
+      [id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Event not found' });
+    }
+
+    res.json({ message: 'Event deleted successfully' });
+
+  } catch (err) {
+    console.error('Error deleting event:', err);
+    res.status(500).json({ error: 'Failed to delete event' });
+  }
+};
+const updateEvent = async (req, res) => {
+  const { id } = req.params;
+  const { title, description, start, end } = req.body;
+
+  if (!title || !start) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  try {
+    const result = await pool.query(
+      `
+      UPDATE group_management.group_events
+      SET title = $1,
+          description = $2,
+          start = $3,
+          "end" = $4
+      WHERE id_event = $5
+      RETURNING *
+      `,
+      [title, description, start, end, id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Event not found' });
+    }
+
+    res.json(result.rows[0]);
+
+  } catch (err) {
+    console.error('Error updating event:', err);
+    res.status(500).json({ error: 'Failed to update event' });
+  }
+};
+module.exports = { createEvent, getEventsByGroup, getAllEvents, deleteEvent, updateEvent };

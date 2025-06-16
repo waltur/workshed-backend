@@ -89,4 +89,15 @@ const registerHelper = async (req, res) => {
   }
 };
 
-module.exports = { registerAttendee, registerInstructor, registerHelper };
+
+const getGroupRoles = async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM group_management.group_roles ORDER BY name_role');
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+};
+
+module.exports = { registerAttendee, registerInstructor, registerHelper, getGroupRoles };

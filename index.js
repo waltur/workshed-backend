@@ -46,3 +46,6 @@ app.use('/api/group-timesheets', timesheetRoutes);
 
 const participationRoutes = require('./routes/groupManagement/participation');
 app.use('/api/group-participation', participationRoutes);
+
+const eventTaskRoutes = require('./routes/groupManagement/tasks');
+app.use('/api/group-tasks', eventTaskRoutes);

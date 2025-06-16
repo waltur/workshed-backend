@@ -75,10 +75,12 @@ const getGroupMembers = async (req, res) => {
   const id = req.params.id;
   try {
     const result = await pool.query(`
-      SELECT gm.id_group_member, gm.role_in_group, gm.join_date,
-             c.id_contact, c.name, c.email
+      SELECT gm.id_group_member, gr.name_role, gm.join_date,
+             c.id_contact, c.name, c.email, c.phone_number,
+             gr.id_group_role, c.name
       FROM group_management.group_members gm
       JOIN contacts.contacts c ON gm.id_contact = c.id_contact
+      LEFT JOIN group_management.group_roles gr ON gm.id_group_role = gr.id_group_role
       WHERE gm.id_group = $1
       ORDER BY gm.join_date DESC
     `, [id]);
@@ -96,7 +98,7 @@ const addGroupMember = async (req, res) => {
 
   try {
     const result = await pool.query(`
-      INSERT INTO group_management.group_members (id_group, id_contact, role_in_group)
+      INSERT INTO group_management.group_members (id_group, id_contact, id_group_role)
       VALUES ($1, $2, $3) RETURNING *`,
       [id_group, id_contact, role_in_group]
     );

@@ -32,7 +32,7 @@ const getEventsByGroup = async (req, res) => {
     const result = await pool.query(`
       SELECT * FROM group_management.group_events WHERE id_group = $1 ORDER BY event_date DESC
     `, [groupId]);
-    res.json(result.rows[0]);
+    res.json(result.rows);
   } catch (err) {
     console.error('Error fetching events:', err);
     res.status(500).json({ error: 'Failed to fetch events' });
@@ -51,6 +51,7 @@ const getAllEvents = async (req, res) => {
       e.start,
       e."end",
       e.location,
+      e.id_group, -- ✅ IMPORTANTE
       g.name,
       CASE WHEN EXISTS (
         SELECT 1 FROM group_management.event_attendees a
@@ -78,16 +79,33 @@ const getAllEvents = async (req, res) => {
       description: row.description,
       start: row.start,
       end: row.end,
-      location:row.location,
+      location: row.location,
+      id_group: row.id_group,
       group_name: row.name,
       registration_roles: [
         row.is_attending,
         row.is_instructor,
         row.is_support
-      ].filter(Boolean) // Elimina nulls
+      ].filter(Boolean)
     }));
 
-    res.json(events);
+    // Traer tareas asociadas a cada evento
+    const eventsWithTasks = await Promise.all(
+      events.map(async (event) => {
+        const taskQuery = `
+          SELECT task_name, time_range, volunteer_needed
+          FROM group_management.event_tasks
+          WHERE id_event = $1
+        `;
+        const taskResult = await pool.query(taskQuery, [event.id_event]);
+        return {
+          ...event,
+          tasks: taskResult.rows
+        };
+      })
+    );
+
+    res.json(eventsWithTasks);
   } catch (error) {
     console.error('Error fetching events:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -115,7 +133,7 @@ const deleteEvent = async (req, res) => {
 };
 const updateEvent = async (req, res) => {
   const { id } = req.params;
-  const { title, description, start, end } = req.body;
+  const { title, description, start, end, id_group, location } = req.body;
 
   if (!title || !start) {
     return res.status(400).json({ error: 'Missing required fields' });
@@ -128,11 +146,13 @@ const updateEvent = async (req, res) => {
       SET title = $1,
           description = $2,
           start = $3,
-          "end" = $4
-      WHERE id_event = $5
+          "end" = $4,
+          id_group = $5,
+          location = $6
+      WHERE id_event = $7
       RETURNING *
       `,
-      [title, description, start, end, id]
+      [title, description, start, end, id_group, location, id]
     );
 
     if (result.rowCount === 0) {
@@ -146,4 +166,16 @@ const updateEvent = async (req, res) => {
     res.status(500).json({ error: 'Failed to update event' });
   }
 };
-module.exports = { createEvent, getEventsByGroup, getAllEvents, deleteEvent, updateEvent };
+
+const deleteTasksByEventId = async (req, res) => {
+  const { id_event } = req.params;
+
+  try {
+    await pool.query('DELETE FROM group_management.event_tasks WHERE id_event = $1', [id_event]);
+    res.status(200).json({ message: 'Tasks deleted successfully' });
+  } catch (err) {
+    console.error('Error deleting tasks:', err);
+    res.status(500).json({ error: 'Failed to delete tasks' });
+  }
+};
+module.exports = { createEvent, getEventsByGroup, getAllEvents, deleteEvent, updateEvent, deleteTasksByEventId  };

@@ -83,5 +83,22 @@ const getContactById = async (req, res) => {
     res.status(500).json({ error: 'Failed to get contact' });
   }
 };
+const getContactJobRoles = async (req, res) => {
+  const { id_contact } = req.params;
 
-module.exports = { createContact,getAllContacts, updateContact, deleteContact,reactivateContact,getContactById };
+  try {
+    const result = await pool.query(`
+      SELECT jr.id_job_role, jr.title
+      FROM contacts.contact_job_role cjr
+      JOIN contacts.job_roles jr ON jr.id_job_role = cjr.id_job_role
+      WHERE cjr.id_contact = $1
+    `, [id_contact]);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching contact job roles:', err);
+    res.status(500).json({ error: 'Failed to fetch job roles' });
+  }
+};
+
+module.exports = { createContact,getAllContacts, updateContact, deleteContact,reactivateContact,getContactById, getContactJobRoles };

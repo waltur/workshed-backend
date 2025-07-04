@@ -3,7 +3,26 @@ const pool = require('../../db');
 // Listar todos los grupos
 const getGroups = async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM group_management.groups ORDER BY name');
+    const result = await pool.query(`
+   SELECT
+     g.*,
+     COALESCE(
+       JSON_AGG(
+         JSON_BUILD_OBJECT(
+           'id_contact', gm.id_contact,
+           'id_group_member', gm.id_group_member,
+           'role_name', gr.name_role
+         )
+       ) FILTER (WHERE gm.id_contact IS NOT NULL),
+       '[]'
+     ) AS members
+   FROM group_management.groups g
+   LEFT JOIN group_management.group_members gm ON g.id_group = gm.id_group
+   LEFT JOIN group_management.group_roles gr ON gm.id_group_role = gr.id_group_role
+   GROUP BY g.id_group
+   ORDER BY g.name;
+    `);
+
     res.json(result.rows);
   } catch (err) {
     console.error('Error getting groups:', err);

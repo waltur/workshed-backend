@@ -33,7 +33,7 @@ const createNewsPost = async (req, res) => {
 
     // Guardar post (guarda como array JSON en un solo campo)
     const result = await pool.query(
-      `INSERT INTO news_posts (title, description, images)
+      `INSERT INTO news.news_posts (title, description, images)
        VALUES ($1, $2, $3)
        RETURNING *`,
       [title, description, JSON.stringify(imageNames)]

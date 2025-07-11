@@ -10,5 +10,6 @@ router.delete('/:id', controller.deleteGroup);
 router.get('/:id/members', controller.getGroupMembers);
 router.post('/:id/members', controller.addGroupMember);
 router.delete('/:id/members/:memberId', controller.removeGroupMember);
+router.get('/:id_event/attendance-report', controller.getEventAttendanceReport);
 
 module.exports = router;

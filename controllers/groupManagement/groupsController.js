@@ -141,6 +141,37 @@ const removeGroupMember = async (req, res) => {
     res.status(500).json({ error: 'Failed to remove group member' });
   }
 };
+const getEventAttendanceReport = async (req, res) => {
+  const { id_event } = req.params;
+
+  const query = `
+    SELECT
+      c.name AS name,
+      c.emergency_contact,
+      s.signature,
+      e.start,
+      e."end",
+      e.title
+    FROM group_management.event_attendees a
+    JOIN contacts.contacts c ON a.id_contact = c.id_contact
+    JOIN group_management.group_events e ON a.id_event = e.id_event
+    JOIN group_management.event_signatures s ON s.id_event = a.id_event AND s.id_contact = a.id_contact
+    WHERE a.id_event = $1 AND a.attended = true
+    ORDER BY c.name ASC
+  `;
+
+  try {
+    const result = await pool.query(query, [id_event]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching attendance report:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+module.exports = {
+  getEventAttendanceReport
+};
 
 
 module.exports = {
@@ -151,6 +182,7 @@ module.exports = {
   deleteGroup,
   getGroupMembers,
   addGroupMember,
-  removeGroupMember
+  removeGroupMember,
+  getEventAttendanceReport
 
 };

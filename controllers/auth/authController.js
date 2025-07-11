@@ -13,14 +13,42 @@ const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
 
 
 const register = async (req, res) => {
-  const { name, phone_number, email, username, password, roles, job_roles = [] } = req.body;
+console.log("register");
+  const { name, phone_number, email, username, password, roles, job_roles = [], photoBase64, emergency_contact } = req.body;
+
+let photoUrl = null;
+
+  if (photoBase64) {
+    try {
+      const matches = photoBase64.match(/^data:(.+);base64,(.+)$/);
+      if (!matches || matches.length !== 3) {
+        return res.status(400).json({ error: 'Invalid image format' });
+      }
+
+      const ext = matches[1].includes('png') ? '.png' : '.jpg';
+      const buffer = Buffer.from(matches[2], 'base64');
+      const filename = `photo_${uuidv4()}${ext}`;
+      const uploadPath = path.join(__dirname, '../../public/uploads/photos');
+
+      if (!fs.existsSync(uploadPath)) {
+        fs.mkdirSync(uploadPath, { recursive: true });
+      }
+
+      fs.writeFileSync(path.join(uploadPath, filename), buffer);
+      photoUrl = `/public/uploads/photos/${filename}`;
+
+    } catch (err) {
+      console.error('Error saving image:', err);
+      return res.status(500).json({ error: 'Failed to save photo' });
+    }
+  }
 
   try {
     // 1. Crear contacto
     const contactResult = await pool.query(
-      `INSERT INTO contacts.contacts (name, email, phone_number, type)
-       VALUES ($1, $2, $3, $4) RETURNING id_contact`,
-      [name, email, phone_number, 'Person']
+      `INSERT INTO contacts.contacts (name, email, phone_number, type, photo_url, emergency_contact)
+       VALUES ($1, $2, $3, $4, $5, $6 ) RETURNING id_contact`,
+      [name, email, phone_number, 'Person',photoUrl, emergency_contact]
     );
     const id_contact = contactResult.rows[0].id_contact;
 

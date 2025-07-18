@@ -173,6 +173,24 @@ const deleteEvent = async (req, res) => {
   const { id } = req.params;
 
   try {
+    // Verificar si hay timesheets asociados
+    const timesheets = await pool.query(
+      `SELECT 1 FROM group_management.group_timesheets WHERE id_event = $1 LIMIT 1`,
+      [id]
+    );
+
+    // Verificar si hay asistentes asociados
+    const attendees = await pool.query(
+      `SELECT 1 FROM group_management.event_attendees WHERE id_event = $1 LIMIT 1`,
+      [id]
+    );
+
+    if (timesheets.rowCount > 0 || attendees.rowCount > 0) {
+      return res.status(409).json({
+        error: 'This event has related timesheets or attendees. Confirm deletion with cascade.'
+      });
+    }
+
     const result = await pool.query(
       `DELETE FROM group_management.group_events WHERE id_event = $1 RETURNING *`,
       [id]
@@ -189,6 +207,55 @@ const deleteEvent = async (req, res) => {
     res.status(500).json({ error: 'Failed to delete event' });
   }
 };
+
+const deleteEventCascade = async (req, res) => {
+  const { id } = req.params;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Eliminar asistentes del evento
+    await client.query(
+      `DELETE FROM group_management.event_attendees WHERE id_event = $1`,
+      [id]
+    );
+
+    // Eliminar timesheets relacionados
+    await client.query(
+      `DELETE FROM group_management.group_timesheets WHERE id_event = $1`,
+      [id]
+    );
+
+    // Eliminar tareas del evento
+    await client.query(
+      `DELETE FROM group_management.event_tasks WHERE id_event = $1`,
+      [id]
+    );
+
+    // Finalmente eliminar el evento
+    const result = await client.query(
+      `DELETE FROM group_management.group_events WHERE id_event = $1 RETURNING *`,
+      [id]
+    );
+
+    if (result.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Event not found' });
+    }
+
+    await client.query('COMMIT');
+    res.json({ message: 'Event and all related records deleted successfully' });
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting event cascade:', err);
+    res.status(500).json({ error: 'Failed to delete event and related data' });
+  } finally {
+    client.release();
+  }
+};
+
 const updateEvent = async (req, res) => {
   const { id } = req.params;
   const { title, description, start, end, id_group, location } = req.body;
@@ -291,4 +358,4 @@ const saveSignature = async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
-module.exports = { createEvent, getEventsByGroup, getAllEvents, deleteEvent, updateEvent, deleteTasksByEventId, getEventRegistrations, updateAttendance,saveSignature };
+module.exports = { createEvent, getEventsByGroup, getAllEvents, deleteEvent, updateEvent, deleteTasksByEventId, getEventRegistrations, updateAttendance,saveSignature,deleteEventCascade };

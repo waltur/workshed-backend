@@ -48,10 +48,11 @@ let photoUrl = null;
 
   try {
     // 1. Crear contacto
+    const sanitizedEmergencyContact = emergency_contact === '' ? null : emergency_contact;
     const contactResult = await pool.query(
       `INSERT INTO contacts.contacts (name, email, phone_number, type, photo_url, emergency_contact)
        VALUES ($1, $2, $3, $4, $5, $6 ) RETURNING id_contact`,
-      [name, email, phone_number, 'Person',photoUrl, emergency_contact]
+      [name, email, phone_number, 'Person',photoUrl, sanitizedEmergencyContact]
     );
     const id_contact = contactResult.rows[0].id_contact;
 

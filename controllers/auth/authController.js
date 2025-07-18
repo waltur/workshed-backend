@@ -8,6 +8,9 @@ const nodemailer = require('nodemailer');
 const ACCESS_TOKEN_SECRET = process.env.JWT_SECRET;
 const REFRESH_TOKEN_SECRET = process.env.JWT_REFRESH_SECRET;
 const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
+const { sendVerificationEmail } = require('../../emailUtils');
+const path = require('path');
+const fs = require('fs');
 
 
 
@@ -52,6 +55,24 @@ let photoUrl = null;
     );
     const id_contact = contactResult.rows[0].id_contact;
 
+    await pool.query(`
+      INSERT INTO membership.membership_forms (
+        id_contact, age_range, photo_permission, community_preference,
+        wants_to_volunteer, acknowledged_rules, acknowledged_privacy,
+        acknowledged_code_of_conduct, acknowledged_health_safety, volunteer_acknowledgement
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+    `, [
+      id_contact,
+      req.body.age_range,
+      req.body.photo_permission,
+      req.body.community_preference,
+      req.body.wants_to_volunteer,
+      req.body.acknowledged_rules,
+      req.body.acknowledged_privacy,
+      req.body.acknowledged_code_of_conduct,
+      req.body.acknowledged_health_safety,
+      req.body.volunteer_acknowledgement || null
+    ]);
     // 2. Crear usuario
     const hash = await bcrypt.hash(password, 10);
     const userResult = await pool.query(
@@ -60,6 +81,7 @@ let photoUrl = null;
       [username, email, hash, id_contact,'1']
     );
     const userId = userResult.rows[0].id_user;
+    await sendVerificationEmail(userId, email);
 
     // 3. Asignar roles
     for (const roleId of roles) {
@@ -101,6 +123,9 @@ const login = async (req, res) => {
 
  if (!user) {
    return res.status(401).type('application/json').json({ message: 'Invalid credentials' });
+ }
+ if (!user.is_verified) {
+     return res.status(403).json({ message: 'Please verify your email before logging in.' });
  }
 
  const match = await bcrypt.compare(password, user.password_hash);
@@ -317,5 +342,66 @@ const resetPassword = async (req, res) => {
     res.status(500).json({ message: 'Server error during password reset' });
   }
 };
+const verifyEmail = async (req, res) => {
+  const { token } = req.params;
 
-module.exports = { register, login, checkEmailExists, checkUsernameExists,refreshToken, changePassword, forgotPassword, resetPassword };
+  try {
+    const result = await pool.query(`
+      SELECT user_id FROM auth.email_verifications
+      WHERE token = $1 AND expires_at > NOW() AND verified = false
+    `, [token]);
+
+    const verification = result.rows[0];
+
+    if (!verification) {
+      return res.status(400).json({ message: 'Invalid or expired token' });
+    }
+
+    // 1. Marcar como verificado en email_verifications
+    await pool.query(`
+      UPDATE auth.email_verifications
+      SET verified = true
+      WHERE token = $1
+    `, [token]);
+
+    // 2. Marcar como verificado en auth.users
+    await pool.query(`
+      UPDATE auth.users
+      SET is_verified = true
+      WHERE id_user = $1
+    `, [verification.user_id]);
+
+    // 3. Devolver confirmación
+    return res.status(200).json({ message: 'Email successfully verified. You can now log in.' });
+
+  } catch (err) {
+    console.error('Email verification error:', err);
+    return res.status(500).json({ message: 'Server error during email verification' });
+  }
+};
+const resendVerificationEmail = async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const user = result.rows[0];
+
+    if (user.is_verified) {
+      return res.status(400).json({ message: 'User is already verified' });
+    }
+
+    const token = generateEmailToken(user.id_user); // Usa tu función actual de generación de token
+    await sendVerificationEmail(email, token);
+
+    res.json({ message: 'Verification email resent' });
+  } catch (err) {
+    console.error('Error resending verification email:', err);
+    res.status(500).json({ message: 'Error sending email' });
+  }
+};
+
+module.exports = { register, login, checkEmailExists, checkUsernameExists,refreshToken, changePassword, forgotPassword, resetPassword, verifyEmail, resendVerificationEmail  };

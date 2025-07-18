@@ -53,14 +53,14 @@ const getUserById = async (req, res) => {
   try {
     // 1. Obtener datos del usuario con roles
     const userResult = await pool.query(`
-      SELECT c.name, c.phone_number, u.id_user, u.username, u.email, u.is_active, u.id_contact,
+      SELECT c.name, c.phone_number, c.emergency_contact,c.photo_url, u.id_user, u.username, u.email, u.is_active, u.id_contact,
         ARRAY_AGG(r.role_name) AS roles
       FROM auth.users u
       LEFT JOIN auth.user_roles ur ON u.id_user = ur.id_user
       LEFT JOIN auth.roles r ON ur.id_role = r.id_role
       LEFT JOIN contacts.contacts c ON c.id_contact = u.id_contact
       WHERE u.id_user = $1
-      GROUP BY u.id_user, c.name, c.phone_number
+      GROUP BY u.id_user, c.name, c.phone_number,c.emergency_contact,c.photo_url
     `, [userId]);
 
     if (userResult.rowCount === 0) {
@@ -88,6 +88,8 @@ const getUserById = async (req, res) => {
       email: user.email,
       is_active: user.is_active,
       roles: user.roles,
+      emergency_contact: user.emergency_contact,
+      photo_url:user.photo_url,
       job_roles // ✅ devuelto como array de números
     });
 
@@ -105,12 +107,6 @@ const createUser = async (req, res) => {
     const existing = await pool.query(`SELECT 1 FROM auth.users WHERE email = $1`, [email]);
     if (existing.rowCount > 0) return res.status(409).json({ error: 'Email is already in use' });
 
-    // Verificar si el token tiene permiso
-   // const token = req.headers.authorization?.split(' ')[1];
-   // const payload = jwt.verify(token, process.env.JWT_SECRET);
-   // if (!payload.roles.includes('admin') && roles.length > 0) {
-   //   return res.status(403).json({ error: 'Only admins can assign roles' });
-   // }
 
     // 🔐 Crear contacto mínimo para asociar job_roles
     const contactResult = await pool.query(`

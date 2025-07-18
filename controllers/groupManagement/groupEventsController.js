@@ -2,7 +2,17 @@
 const pool = require('../../db');
 // Crear evento
 const createEvent = async (req, res) => {
-  const { id_group, title, description, start, end, location, repeatType = '', repeatCount = 1 } = req.body;
+console.log("create event");
+  const {
+    id_group,
+    title,
+    description,
+    start,
+    end,
+    location,
+    repeatType = '',
+    repeatCount = 1,
+  } = req.body;
 
   if (!id_group || !title || !start) {
     return res.status(400).json({ error: 'Missing required fields' });
@@ -10,25 +20,18 @@ const createEvent = async (req, res) => {
 
   const events = [];
 
-  const startDate = new Date(start);
-  const endDate = end ? new Date(end) : null;
+  // Obtener hora exacta sin desfase por zona horaria
+  let startDate = new Date(start + ':00'); // Asegura formato completo con segundos
+  let endDate = end ? new Date(end + ':00') : null;
 
   for (let i = 0; i < repeatCount; i++) {
-    const newStart = new Date(startDate);
-    const newEnd = endDate ? new Date(endDate) : null;
+    // Crear nuevas instancias para esta iteración
+    const eventStart = new Date(startDate);
+    const eventEnd = endDate ? new Date(endDate) : null;
 
-    if (i > 0) {
-      if (repeatType === 'weekly') {
-        newStart.setDate(newStart.getDate() + 7 * i);
-        if (newEnd) newEnd.setDate(newEnd.getDate() + 7 * i);
-      } else if (repeatType === 'monthly') {
-        newStart.setMonth(newStart.getMonth() + i);
-        if (newEnd) newEnd.setMonth(newEnd.getMonth() + i);
-      }
-    }
-
-    const formattedStart = newStart.toISOString().slice(0, 19).replace('T', ' ');
-    const formattedEnd = newEnd ? newEnd.toISOString().slice(0, 19).replace('T', ' ') : null;
+    // Guardar como string en formato 'YYYY-MM-DD HH:mm:ss'
+    const formattedStart = eventStart.toISOString().slice(0, 19).replace('T', ' ');
+    //const formattedEnd = eventEnd ? eventEnd.toISOString().slice(0, 19).replace('T', ' ') : null;
     const eventDate = formattedStart.split(' ')[0];
 
     try {
@@ -36,19 +39,32 @@ const createEvent = async (req, res) => {
         `
         INSERT INTO group_management.group_events (id_group, title, description, start, "end", event_date, location)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING *
+        RETURNING *;
         `,
-        [id_group, title, description, formattedStart, formattedEnd, eventDate, location]
+        [id_group, title, description, eventStart, eventEnd, eventDate, location]
       );
       events.push(result.rows[0]);
     } catch (err) {
       console.error('Error creating event:', err);
       return res.status(500).json({ error: 'Failed to create event(s)' });
     }
+
+    // Avanzar la fecha para la próxima repetición
+    if (repeatType === 'weekly') {
+      startDate.setDate(startDate.getDate() + 7);
+      if (endDate) endDate.setDate(endDate.getDate() + 7);
+    } else if (repeatType === 'monthly') {
+      startDate.setMonth(startDate.getMonth() + 1);
+      if (endDate) endDate.setMonth(endDate.getMonth() + 1);
+    }
   }
 
   return res.status(201).json(events.length === 1 ? events[0] : events);
 };
+
+
+
+
 // Listar eventos por grupo
 const getEventsByGroup = async (req, res) => {
   const groupId = req.params.id;

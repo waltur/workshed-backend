@@ -27,7 +27,7 @@ async function sendVerificationEmail(userId, email) {
     );
 
     // 2. Crear link de verificación
-    const verifyLink = `${frontendUrl}/verify-email/${token}`;
+    const verifyLink = `${frontendUrl}/login/verify-email/${token}`;
 
     // 3. Configurar MailerSend
     const sentFrom = new Sender(

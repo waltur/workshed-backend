@@ -7,6 +7,7 @@ const fileUpload = require('express-fileupload');
 const app = express();
 const port = process.env.PORT || 3000;
 
+
 // Middlewares
 app.use(cors());
 //app.use(express.json());
@@ -59,4 +60,5 @@ app.use('/api/group-tasks', eventTaskRoutes);
 const newsRoutes = require('./routes/news/news');
 app.use('/api/news', newsRoutes);
 
-app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
+const uploadImages = require('./routes/uploadImages/uploadImages');
+app.use('/api/upload', uploadImages);

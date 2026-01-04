@@ -18,42 +18,16 @@ const fs = require('fs');
 
 const register = async (req, res) => {
 console.log("register");
-  const { name, phone_number, email, username, password, roles, job_roles = [], photoBase64, emergency_contact } = req.body;
+  const { name, phone_number, email, username, password, roles, job_roles = [], emergency_contact, photo_url } = req.body;
 
-let photoUrl = null;
-
-  if (photoBase64) {
-    try {
-      const matches = photoBase64.match(/^data:(.+);base64,(.+)$/);
-      if (!matches || matches.length !== 3) {
-        return res.status(400).json({ error: 'Invalid image format' });
-      }
-
-      const ext = matches[1].includes('png') ? '.png' : '.jpg';
-      const buffer = Buffer.from(matches[2], 'base64');
-      const filename = `photo_${uuidv4()}${ext}`;
-      const uploadPath = path.join(__dirname, '../../public/uploads/photos');
-
-      if (!fs.existsSync(uploadPath)) {
-        fs.mkdirSync(uploadPath, { recursive: true });
-      }
-
-      fs.writeFileSync(path.join(uploadPath, filename), buffer);
-      photoUrl = `/public/uploads/photos/${filename}`;
-
-    } catch (err) {
-      console.error('Error saving image:', err);
-      return res.status(500).json({ error: 'Failed to save photo' });
-    }
-  }
-
+console.log('PHOTO URL RECEIVED:', photo_url);
   try {
     // 1. Crear contacto
     const sanitizedEmergencyContact = emergency_contact === '' ? null : emergency_contact;
     const contactResult = await pool.query(
       `INSERT INTO contacts.contacts (name, email, phone_number, type, photo_url, emergency_contact)
        VALUES ($1, $2, $3, $4, $5, $6 ) RETURNING id_contact`,
-      [name, email, phone_number, 'Person',photoUrl, sanitizedEmergencyContact]
+      [name, email, phone_number, 'Person', photo_url || null, sanitizedEmergencyContact]
     );
     const id_contact = contactResult.rows[0].id_contact;
 
@@ -83,7 +57,12 @@ let photoUrl = null;
       [username, email, hash, id_contact,'1']
     );
     const userId = userResult.rows[0].id_user;
-    await sendVerificationEmail(userId, email);
+
+    try {
+      await sendVerificationEmail(userId, email);
+    } catch (err) {
+      console.error('Email verification failed, but user was created:', err);
+    }
 
     // 3. Asignar roles
     for (const roleId of roles) {
@@ -92,11 +71,17 @@ let photoUrl = null;
         [userId, roleId]
       );
     }
-    const hasVolunteerRole = roles.some(roleId => {
+    /*const hasVolunteerRole = roles.some(roleId => {
       return pool.query(`SELECT role_name FROM auth.roles WHERE id_role = $1`, [roleId])
         .then(res => res.rows[0]?.name === 'volunteer');
-    });
-
+    });*/
+    const volunteerRoleResult = await pool.query(
+      `SELECT id_role FROM auth.roles WHERE LOWER(role_name) = 'volunteer'`
+    );
+    const volunteerRoleId = volunteerRoleResult.rows[0]?.id_role;
+    const hasVolunteerRole = volunteerRoleId
+    ? roles.includes(volunteerRoleId)
+     : false;
     if (hasVolunteerRole && job_roles.length > 0) {
       for (const jobId of job_roles) {
         await pool.query(

@@ -2,46 +2,49 @@
 const fs = require('fs');
 const path = require('path');
 const pool = require('../../db');
+const supabase = require('../../services/supabase');
 
 const createNewsPost = async (req, res) => {
   try {
     const { title, description } = req.body;
+    let imageUrls = [];
 
-    if (!title || !description) {
-      return res.status(400).json({ message: 'Missing title or description' });
-    }
-
-    let imageNames = [];
-
-    // Soporte para una o múltiples imágenes
-    if (req.files && req.files.images) {
-      const files = Array.isArray(req.files.images) ? req.files.images : [req.files.images];
+    if (req.files?.images) {
+      const files = Array.isArray(req.files.images)
+        ? req.files.images
+        : [req.files.images];
 
       for (const file of files) {
-        const ext = path.extname(file.name);
-        const fileName = `${Date.now()}-${Math.floor(Math.random() * 1000)}${ext}`;
-        const uploadPath = path.join(__dirname, '../../public/uploads/news/', fileName);
+        const ext = file.name.split('.').pop();
+        const fileName = `posts/${Date.now()}-${Math.random()}.${ext}`;
 
-        // Crear directorio si no existe
-        fs.mkdirSync(path.dirname(uploadPath), { recursive: true });
+        const { error } = await supabase.storage
+          .from('news')
+          .upload(fileName, file.data, {
+            contentType: file.mimetype,
+            upsert: false
+          });
 
-        // Mover archivo
-        await file.mv(uploadPath);
-        imageNames.push(fileName);
+        if (error) throw error;
+
+        const { data } = supabase.storage
+          .from('news')
+          .getPublicUrl(fileName);
+
+        imageUrls.push(data.publicUrl);
       }
     }
 
-    // Guardar post (guarda como array JSON en un solo campo)
     const result = await pool.query(
       `INSERT INTO news.news_posts (title, description, images)
        VALUES ($1, $2, $3)
        RETURNING *`,
-      [title, description, JSON.stringify(imageNames)]
+      [title, description, JSON.stringify(imageUrls)]
     );
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    console.error('Error creating post:', err);
+    console.error(err);
     res.status(500).json({ message: 'Error creating post' });
   }
 };

@@ -119,8 +119,8 @@ const createUser = async (req, res) => {
     // 🔐 Crear usuario vinculado al contacto
     const hash = await bcrypt.hash(password, 10);
     const userResult = await pool.query(`
-      INSERT INTO auth.users (username, email, password_hash, is_active, id_contact)
-      VALUES ($1, $2, $3, '1', $4) RETURNING id_user
+      INSERT INTO auth.users (username, email, password_hash, is_active, id_contact,is_verified)
+      VALUES ($1, $2, $3, '1', $4,true) RETURNING id_user
     `, [username, email, hash, id_contact]);
 
     const userId = userResult.rows[0].id_user;

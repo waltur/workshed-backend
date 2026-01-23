@@ -1,8 +1,8 @@
 
 const pool = require('../../db');
+const { v4: uuidv4 } = require('uuid');
 // Crear evento
 const createEvent = async (req, res) => {
-console.log("create event");
   const {
     id_group,
     title,
@@ -18,51 +18,166 @@ console.log("create event");
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
+  // ✅ Crear series_id solo si es recurrente
+  const seriesId = repeatType ? uuidv4() : null;
+
+  let startDate = new Date(start);
+  let endDate = end ? new Date(end) : null;
+
   const events = [];
 
-  // Obtener hora exacta sin desfase por zona horaria
-  let startDate = new Date(start + ':00'); // Asegura formato completo con segundos
-  let endDate = end ? new Date(end + ':00') : null;
+  try {
+    for (let i = 0; i < repeatCount; i++) {
+      const eventStart = new Date(startDate);
+      const eventEnd = endDate ? new Date(endDate) : null;
+      const eventDate = eventStart.toISOString().split('T')[0];
 
-  for (let i = 0; i < repeatCount; i++) {
-    // Crear nuevas instancias para esta iteración
-    const eventStart = new Date(startDate);
-    const eventEnd = endDate ? new Date(endDate) : null;
-
-    // Guardar como string en formato 'YYYY-MM-DD HH:mm:ss'
-    const formattedStart = eventStart.toISOString().slice(0, 19).replace('T', ' ');
-    //const formattedEnd = eventEnd ? eventEnd.toISOString().slice(0, 19).replace('T', ' ') : null;
-    const eventDate = formattedStart.split(' ')[0];
-
-    try {
       const result = await pool.query(
         `
-        INSERT INTO group_management.group_events (id_group, title, description, start, "end", event_date, location)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING *;
+        INSERT INTO group_management.group_events
+        (id_group, title, description, start, "end", event_date, location, series_id)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        RETURNING *
         `,
-        [id_group, title, description, eventStart, eventEnd, eventDate, location]
+        [
+          id_group,
+          title,
+          description,
+          eventStart,
+          eventEnd,
+          eventDate,
+          location,
+          seriesId
+        ]
       );
+
       events.push(result.rows[0]);
-    } catch (err) {
-      console.error('Error creating event:', err);
-      return res.status(500).json({ error: 'Failed to create event(s)' });
+
+      // 👉 Avanzar fechas
+      if (repeatType === 'weekly') {
+        startDate.setDate(startDate.getDate() + 7);
+        if (endDate) endDate.setDate(endDate.getDate() + 7);
+      }
+
+      if (repeatType === 'monthly') {
+        startDate.setMonth(startDate.getMonth() + 1);
+        if (endDate) endDate.setMonth(endDate.getMonth() + 1);
+      }
     }
 
-    // Avanzar la fecha para la próxima repetición
-    if (repeatType === 'weekly') {
-      startDate.setDate(startDate.getDate() + 7);
-      if (endDate) endDate.setDate(endDate.getDate() + 7);
-    } else if (repeatType === 'monthly') {
-      startDate.setMonth(startDate.getMonth() + 1);
-      if (endDate) endDate.setMonth(endDate.getMonth() + 1);
-    }
+    res.status(201).json(events.length === 1 ? events[0] : events);
+
+  } catch (error) {
+    console.error('Error creating event(s):', error);
+    res.status(500).json({ error: 'Failed to create event(s)' });
+  }
+};
+// 🔁 Actualizar eventos recurrentes (single | from | all)
+const updateEventSeries = async (req, res) => {
+  const { seriesId } = req.params;
+  const {
+    scope = 'all',       // 'single' | 'from' | 'all'
+    fromDate = null,     // requerido solo para 'from'
+    title,
+    description,
+    start,
+    end,
+    id_group,
+    location
+  } = req.body;
+
+  if (!seriesId) {
+    return res.status(400).json({ error: 'Missing seriesId' });
   }
 
-  return res.status(201).json(events.length === 1 ? events[0] : events);
+  if (!title || !start) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  let query = '';
+  let values = [];
+
+  try {
+    // 🔹 SOLO ESTE EVENTO (seguridad extra, normalmente se usa updateEvent)
+    if (scope === 'single') {
+      return res.status(400).json({
+        error: 'Use updateEvent endpoint for single event updates'
+      });
+    }
+
+    // 🔹 TODOS LOS EVENTOS DE LA SERIE
+    if (scope === 'all') {
+      query = `
+        UPDATE group_management.group_events
+        SET title = $1,
+            description = $2,
+            start = $3,
+            "end" = $4,
+            id_group = $5,
+            location = $6
+        WHERE series_id = $7
+        RETURNING *
+      `;
+      values = [
+        title,
+        description,
+        start,
+        end,
+        id_group,
+        location,
+        seriesId
+      ];
+    }
+
+    // 🔹 ESTE Y LOS SIGUIENTES
+    if (scope === 'from') {
+      if (!fromDate) {
+        return res.status(400).json({
+          error: 'fromDate is required when scope is "from"'
+        });
+      }
+
+      query = `
+        UPDATE group_management.group_events
+        SET title = $1,
+            description = $2,
+            start = $3,
+            "end" = $4,
+            id_group = $5,
+            location = $6
+        WHERE series_id = $7
+          AND start >= $8
+        RETURNING *
+      `;
+      values = [
+        title,
+        description,
+        start,
+        end,
+        id_group,
+        location,
+        seriesId,
+        fromDate
+      ];
+    }
+
+    const result = await pool.query(query, values);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'No events updated' });
+    }
+
+    res.json({
+      message: 'Event series updated successfully',
+      updated: result.rowCount,
+      events: result.rows
+    });
+
+  } catch (err) {
+    console.error('Error updating event series:', err);
+    res.status(500).json({ error: 'Failed to update event series' });
+  }
 };
-
-
 
 
 // Listar eventos por grupo
@@ -85,6 +200,7 @@ const getAllEvents = async (req, res) => {
 
   const query = `
     SELECT
+      e.series_id,
       e.id_event,
       e.title,
       e.description,
@@ -137,6 +253,7 @@ const getAllEvents = async (req, res) => {
       location: row.location,
       id_group: row.id_group,
       group_name: row.name,
+      series_id: row.series_id,
       registration_roles: [
         row.is_attending,
         row.is_instructor,
@@ -358,4 +475,4 @@ const saveSignature = async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
-module.exports = { createEvent, getEventsByGroup, getAllEvents, deleteEvent, updateEvent, deleteTasksByEventId, getEventRegistrations, updateAttendance,saveSignature,deleteEventCascade };
+module.exports = { createEvent, getEventsByGroup, getAllEvents, deleteEvent, updateEvent,updateEventSeries, deleteTasksByEventId, getEventRegistrations, updateAttendance,saveSignature,deleteEventCascade };

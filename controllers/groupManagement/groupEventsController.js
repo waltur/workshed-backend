@@ -12,14 +12,14 @@ const createEvent = async (req, res) => {
     location,
     repeatType = '',
     repeatCount = 1,
+    series_id,
   } = req.body;
 
   if (!id_group || !title || !start) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
-  // ✅ Crear series_id solo si es recurrente
-  const seriesId = repeatType ? uuidv4() : null;
+
 
   let startDate = new Date(start);
   let endDate = end ? new Date(end) : null;
@@ -47,7 +47,7 @@ const createEvent = async (req, res) => {
           eventEnd,
           eventDate,
           location,
-          seriesId
+          series_id
         ]
       );
 
@@ -74,7 +74,7 @@ const createEvent = async (req, res) => {
 };
 // 🔁 Actualizar eventos recurrentes (single | from | all)
 const updateEventSeries = async (req, res) => {
-  const { seriesId } = req.params;
+  const { series_id } = req.params;
   const {
     scope = 'all',       // 'single' | 'from' | 'all'
     fromDate = null,     // requerido solo para 'from'
@@ -125,7 +125,7 @@ const updateEventSeries = async (req, res) => {
         end,
         id_group,
         location,
-        seriesId
+        series_id
       ];
     }
 
@@ -156,7 +156,7 @@ const updateEventSeries = async (req, res) => {
         end,
         id_group,
         location,
-        seriesId,
+        series_id,
         fromDate
       ];
     }

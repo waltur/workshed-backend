@@ -158,31 +158,62 @@ const login = async (req, res) => {
 const refreshToken = async (req, res) => {
   const { token } = req.body;
 
-  if (!token) return res.status(401).json({ error: 'Missing token' });
+  if (!token) {
+    return res.status(401).json({ error: 'Missing token' });
+  }
 
   try {
+    // 1️⃣ Verificar refresh token
     const stored = await pool.query(
       `SELECT * FROM auth.refresh_tokens WHERE token = $1`,
       [token]
     );
 
-    if (stored.rowCount === 0) return res.status(403).json({ error: 'Invalid token' });
+    if (stored.rowCount === 0) {
+      return res.status(403).json({ error: 'Invalid token' });
+    }
 
     const payload = jwt.verify(token, REFRESH_TOKEN_SECRET);
 
-    const roles = await getUserRoles(payload.id);
+    // 2️⃣ Volver a cargar datos reales del usuario
+    const userResult = await pool.query(
+      `SELECT id_user, username, email, id_contact
+       FROM auth.users
+       WHERE id_user = $1`,
+      [payload.id]
+    );
+
+    const user = userResult.rows[0];
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // 3️⃣ Roles completos
+    const roles = await getUserRoles(user.id_user);
+    const jobRoles = await getUserJobRoles(user.id_user);
+
+    // 4️⃣ Nuevo access token COMPLETO
     const newAccessToken = jwt.sign(
-      { id: payload.id, username: payload.username, email: payload.email, roles },
+      {
+        id: user.id_user,
+        username: user.username,
+        email: user.email,
+        contact_id: user.id_contact,
+        roles,
+        job_roles: jobRoles
+      },
       ACCESS_TOKEN_SECRET,
       { expiresIn: '15m' }
     );
 
-    res.json({ accessToken: newAccessToken });
+    return res.json({ accessToken: newAccessToken });
+
   } catch (err) {
     console.error('Refresh token error:', err);
-    res.status(403).json({ error: 'Invalid or expired refresh token' });
+    return res.status(403).json({ error: 'Invalid or expired refresh token' });
   }
 };
+
 const getUserRoles = async (userId) => {
   const result = await pool.query(`
     SELECT r.role_name

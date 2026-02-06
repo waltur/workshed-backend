@@ -114,6 +114,11 @@ const login = async (req, res) => {
  if (!user.is_verified) {
      return res.status(403).json({ message: 'Please verify your email before logging in.' });
  }
+ if (user.is_active !== '1') {
+   return res.status(403).json({
+     message: 'Account disabled. Contact administrator.'
+   });
+ }
 
  const match = await bcrypt.compare(password, user.password_hash);
  if (!match) {
@@ -133,7 +138,7 @@ const login = async (req, res) => {
         job_roles: jobRoles
       },
       ACCESS_TOKEN_SECRET,
-      { expiresIn: '15m' }
+      { expiresIn: '60m' }
     );
 
     const refreshToken = jwt.sign(

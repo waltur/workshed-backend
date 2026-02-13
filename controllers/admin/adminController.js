@@ -6,12 +6,12 @@ const getUsersWithRoles = async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT
-        u.id_user, u.username, u.email, u.is_active,
+        u.id_user, u.username, u.email, u.is_active, u.is_verified,
         ARRAY_AGG(r.role_name) AS roles
       FROM auth.users u
       LEFT JOIN auth.user_roles ur ON u.id_user = ur.id_user
       LEFT JOIN auth.roles r ON ur.id_role = r.id_role
-      GROUP BY u.id_user, u.username, u.email
+      GROUP BY u.id_user, u.username, u.email, u.is_verified
       ORDER BY u.id_user DESC
     `);
 
@@ -45,7 +45,29 @@ const activateUser = async (req, res) => {
     res.status(500).json({ error: 'Failed to activate user' });
   }
 };
+const notVerifiedMail = async (req, res) => {
+console.log("deactivateUser");
+  const userId = req.params.id;
 
+  try {
+    await pool.query(`UPDATE auth.users SET is_verified = '0' WHERE id_user = $1`, [userId]);
+    res.json({ message: 'Not verified mail' });
+  } catch (err) {
+    console.error('Error not verified mail:', err);
+    res.status(500).json({ error: 'Failed to not verified mail' });
+  }
+};
+const verifiedMail = async (req, res) => {
+  const userId = req.params.id;
+
+  try {
+    await pool.query(`UPDATE auth.users SET is_verified = '1' WHERE id_user = $1`, [userId]);
+    res.json({ message: 'Verified mail' });
+  } catch (err) {
+    console.error('Error verified mail:', err);
+    res.status(500).json({ error: 'Failed to verified mail' });
+  }
+};
 
 const getUserById = async (req, res) => {
   const userId = req.params.id;
@@ -53,14 +75,14 @@ const getUserById = async (req, res) => {
   try {
     // 1. Obtener datos del usuario con roles
     const userResult = await pool.query(`
-      SELECT c.name, c.phone_number, c.emergency_contact,c.photo_url, u.id_user, u.username, u.email, u.is_active, u.id_contact,
+      SELECT c.name, c.phone_number, c.emergency_contact,c.photo_url, u.id_user, u.username, u.email, u.is_verified ,u.is_active, u.id_contact,
         ARRAY_AGG(r.role_name) AS roles
       FROM auth.users u
       LEFT JOIN auth.user_roles ur ON u.id_user = ur.id_user
       LEFT JOIN auth.roles r ON ur.id_role = r.id_role
       LEFT JOIN contacts.contacts c ON c.id_contact = u.id_contact
       WHERE u.id_user = $1
-      GROUP BY u.id_user, c.name, c.phone_number,c.emergency_contact,c.photo_url
+      GROUP BY u.id_user, c.name, c.phone_number,c.emergency_contact,c.photo_url, u.is_verified
     `, [userId]);
 
     if (userResult.rowCount === 0) {
@@ -87,6 +109,7 @@ const getUserById = async (req, res) => {
       phone_number:user.phone_number,
       email: user.email,
       is_active: user.is_active,
+      is_verified:user.is_verified,
       roles: user.roles,
       emergency_contact: user.emergency_contact,
       photo_url:user.photo_url,
@@ -223,6 +246,8 @@ const updateUser = async (req, res) => {
 module.exports = {
 getUsersWithRoles,
 deactivateUser,
+notVerifiedMail,
+verifiedMail,
 activateUser,
 getUserById,
 createUser,

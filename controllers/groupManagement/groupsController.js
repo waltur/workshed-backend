@@ -155,7 +155,7 @@ const getEventAttendanceReport = async (req, res) => {
     FROM group_management.event_attendees a
     JOIN contacts.contacts c ON a.id_contact = c.id_contact
     JOIN group_management.group_events e ON a.id_event = e.id_event
-    JOIN group_management.event_signatures s ON s.id_event = a.id_event AND s.id_contact = a.id_contact
+    LEFT JOIN group_management.event_signatures s ON s.id_event = a.id_event AND s.id_contact = a.id_contact
     WHERE a.id_event = $1 AND a.attended = true
     ORDER BY c.name ASC
   `;
@@ -173,6 +173,28 @@ module.exports = {
   getEventAttendanceReport
 };
 
+const cancelBooking = async (req, res) => {
+  const id_event = req.params.id;
+  const id_contact = req.user.contact_id;
+
+  try {
+    await pool.query(
+      `
+      DELETE FROM group_management.event_attendees
+      WHERE id_event = $1
+        AND id_contact = $2
+        AND attended = false
+      `,
+      [id_event, id_contact]
+    );
+
+    res.json({ message: 'Booking canceled' });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error canceling booking' });
+  }
+};
 
 module.exports = {
   getGroups,
@@ -183,6 +205,7 @@ module.exports = {
   getGroupMembers,
   addGroupMember,
   removeGroupMember,
-  getEventAttendanceReport
+  getEventAttendanceReport,
+  cancelBooking
 
 };

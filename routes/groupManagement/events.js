@@ -13,4 +13,5 @@ router.get('/:id_event/attendees', controller.getEventRegistrations);
 router.patch('/:id_event/attendees/:id_contact', controller.updateAttendance);
 router.post('/confirm-attendance', controller.saveSignature);
 router.delete('/events/cascade/:id', controller.deleteEventCascade);
+router.get('/my-events-count', controller.getMyEventsCount);
 module.exports = router;

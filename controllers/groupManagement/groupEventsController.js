@@ -475,4 +475,34 @@ const saveSignature = async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
-module.exports = { createEvent, getEventsByGroup, getAllEvents, deleteEvent, updateEvent,updateEventSeries, deleteTasksByEventId, getEventRegistrations, updateAttendance,saveSignature,deleteEventCascade };
+const getMyEventsCount = async (req, res) => {
+console.log("getMyEventsCount");
+  const { contactId } = req.query;
+
+  if (!contactId) {
+    return res.status(400).json({ error: 'contactId is required' });
+  }
+
+  try {
+    const result = await pool.query(`
+      SELECT COUNT(DISTINCT e.id_event) AS total
+      FROM group_management.group_events e
+      LEFT JOIN group_management.event_attendees a
+        ON a.id_event = e.id_event AND a.id_contact = $1
+      LEFT JOIN group_management.event_instructors i
+        ON i.id_event = e.id_event AND i.id_contact = $1
+      LEFT JOIN group_management.event_helpers h
+        ON h.id_event = e.id_event AND h.id_contact = $1
+      WHERE a.id_contact IS NOT NULL
+         OR i.id_contact IS NOT NULL
+         OR h.id_contact IS NOT NULL
+    `, [contactId]);
+
+    res.json({ total: parseInt(result.rows[0].total) });
+
+  } catch (error) {
+    console.error('Error counting user events:', error);
+    res.status(500).json({ error: 'Failed to count events' });
+  }
+};
+module.exports = { createEvent, getEventsByGroup, getAllEvents, deleteEvent, updateEvent,updateEventSeries, deleteTasksByEventId, getEventRegistrations, updateAttendance,saveSignature,deleteEventCascade, getMyEventsCount };

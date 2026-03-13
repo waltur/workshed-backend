@@ -3,8 +3,13 @@ const fs = require('fs');
 const path = require('path');
 const pool = require('../../db');
 const supabase = require('../../services/supabase');
+const allowedImageTypes = ['image/jpeg', 'image/png'];
+const allowedVideoTypes = ['video/mp4', 'video/webm'];
+const maxImageSize = 2 * 1024 * 1024;   // 2MB
+const maxVideoSize = 50 * 1024 * 1024;  // 50MB
 
 const createNewsPost = async (req, res) => {
+console.log("createNewsPost");
   try {
     const { title, description } = req.body;
     let imageUrls = [];
@@ -15,6 +20,22 @@ const createNewsPost = async (req, res) => {
         : [req.files.images];
 
       for (const file of files) {
+
+        const isImage = allowedImageTypes.includes(file.mimetype);
+        const isVideo = allowedVideoTypes.includes(file.mimetype);
+
+        if (!isImage && !isVideo) {
+          return res.status(400).json({ error: 'Invalid file type' });
+        }
+
+        if (isImage && file.size > maxImageSize) {
+          return res.status(400).json({ error: 'Image too large' });
+        }
+
+        if (isVideo && file.size > maxVideoSize) {
+          return res.status(400).json({ error: 'Video too large' });
+        }
+
         const ext = file.name.split('.').pop();
         const fileName = `posts/${Date.now()}-${Math.random()}.${ext}`;
 

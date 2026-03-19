@@ -195,53 +195,84 @@ const getEventsByGroup = async (req, res) => {
 };
 
 const getAllEvents = async (req, res) => {
-  const { contactId } = req.query;
-  console.log('Received id_contact:', contactId);
-
-  const query = `
-    SELECT
-      e.series_id,
-      e.id_event,
-      e.title,
-      e.description,
-      e.start,
-      e."end",
-      e.location,
-      e.id_group,
-      g.name,
-      -- Verificar si el usuario está registrado como asistente, instructor o support
-        (
-            SELECT signature
-            FROM group_management.event_signatures s
-            WHERE s.id_event = e.id_event AND s.id_contact = $1
-            LIMIT 1
-          ) AS signature,
-      CASE WHEN EXISTS (
-        SELECT 1 FROM group_management.event_attendees a
-        WHERE a.id_event = e.id_event AND a.id_contact = $1
-      ) THEN 'Attendant' ELSE NULL END AS is_attending,
-
-      CASE WHEN EXISTS (
-        SELECT 1 FROM group_management.event_instructors i
-        WHERE i.id_event = e.id_event AND i.id_contact = $1
-      ) THEN 'Coordinator' ELSE NULL END AS is_instructor,
-
-      CASE WHEN EXISTS (
-        SELECT 1 FROM group_management.event_helpers h
-        WHERE h.id_event = e.id_event AND h.id_contact = $1
-      ) THEN 'General Support' ELSE NULL END AS is_support,
-
-      -- ✅ Confirmación de asistencia (nuevo campo)
-      CASE WHEN EXISTS (
-        SELECT 1 FROM group_management.event_attendees a
-        WHERE a.id_event = e.id_event AND a.id_contact = $1 AND a.attended = true
-      ) THEN true ELSE false END AS attended
-    FROM group_management.group_events e
-    LEFT JOIN group_management.groups g ON e.id_group = g.id_group
-    ORDER BY e.start DESC
-  `;
-
   try {
+    const { contactId } = req.query;
+    console.log('Received id_contact:', contactId);
+
+    const query = `
+      SELECT
+        e.series_id,
+        e.id_event,
+        e.title,
+        e.description,
+        e.start,
+        e."end",
+        e.location,
+        e.id_group,
+        g.name,
+
+        -- Firma
+        s.signature,
+
+        -- Roles
+        CASE WHEN a.id_contact IS NOT NULL THEN 'Attendant' ELSE NULL END AS is_attending,
+        CASE WHEN i.id_contact IS NOT NULL THEN 'Coordinator' ELSE NULL END AS is_instructor,
+        CASE WHEN h.id_contact IS NOT NULL THEN 'General Support' ELSE NULL END AS is_support,
+
+        COALESCE(a.attended, false) AS attended,
+
+        -- 🔥 Tasks en una sola columna JSON
+        COALESCE(
+          json_agg(
+            DISTINCT jsonb_build_object(
+              'task_name', t.task_name,
+              'time_range', t.time_range,
+              'volunteer_needed', t.volunteer_needed
+            )
+          ) FILTER (WHERE t.id_event IS NOT NULL),
+          '[]'
+        ) AS tasks
+
+      FROM group_management.group_events e
+
+      LEFT JOIN group_management.groups g
+        ON e.id_group = g.id_group
+
+      LEFT JOIN group_management.event_signatures s
+        ON s.id_event = e.id_event AND s.id_contact = $1
+
+      LEFT JOIN group_management.event_attendees a
+        ON a.id_event = e.id_event AND a.id_contact = $1
+
+      LEFT JOIN group_management.event_instructors i
+        ON i.id_event = e.id_event AND i.id_contact = $1
+
+      LEFT JOIN group_management.event_helpers h
+        ON h.id_event = e.id_event AND h.id_contact = $1
+
+      -- 🔥 JOIN de tasks (clave)
+      LEFT JOIN group_management.event_tasks t
+        ON t.id_event = e.id_event
+
+      GROUP BY
+        e.series_id,
+        e.id_event,
+        e.title,
+        e.description,
+        e.start,
+        e."end",
+        e.location,
+        e.id_group,
+        g.name,
+        s.signature,
+        a.id_contact,
+        a.attended,
+        i.id_contact,
+        h.id_contact
+
+      ORDER BY e.start DESC
+    `;
+
     const result = await pool.query(query, [contactId || null]);
 
     const events = result.rows.map(row => ({
@@ -254,35 +285,25 @@ const getAllEvents = async (req, res) => {
       id_group: row.id_group,
       group_name: row.name,
       series_id: row.series_id,
+
       registration_roles: [
         row.is_attending,
         row.is_instructor,
         row.is_support
       ].filter(Boolean),
+
       attended: row.attended,
       signature: row.signature,
+
+      // 🔥 ya viene directo del SQL
+      tasks: row.tasks
     }));
 
-    // Obtener tareas asociadas
-    const eventsWithTasks = await Promise.all(
-      events.map(async (event) => {
-        const taskQuery = `
-          SELECT task_name, time_range, volunteer_needed
-          FROM group_management.event_tasks
-          WHERE id_event = $1
-        `;
-        const taskResult = await pool.query(taskQuery, [event.id_event]);
-        return {
-          ...event,
-          tasks: taskResult.rows
-        };
-      })
-    );
+    return res.json(events);
 
-    res.json(eventsWithTasks);
   } catch (error) {
     console.error('Error fetching events:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 };
 

@@ -4,9 +4,41 @@ require('dotenv').config();
 const path = require('path');
 const fileUpload = require('express-fileupload');
 
-const app = express();
+//const app = express();
 const port = process.env.PORT || 3000;
+//WebSockets
+const http = require('http');
+const { Server } = require('socket.io');
 
+const app = express();
+const server = http.createServer(app);
+
+// 🔥 SOCKET SERVER
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+  }
+});
+
+// 👇 HACER GLOBAL (CLAVE)
+app.set('io', io);
+
+io.on('connection', (socket) => {
+  console.log('Cliente conectado:', socket.id);
+
+  socket.on('disconnect', () => {
+    console.log('Cliente desconectado');
+  });
+});
+
+/*server.listen(3000, () => {
+  console.log('Servidor corriendo');
+});*/
+// Iniciar servidor
+server.listen(port, () => {
+  console.log(`Server + Socket.IO running on port ${port}`);
+});
+//
 
 // Middlewares
 app.use(cors());
@@ -20,10 +52,7 @@ app.use('/api', indexRoutes);
 app.use('/uploads/news', express.static(path.join(__dirname, '../public/uploads/news')));
 app.use('/uploads/photos', express.static(path.join(__dirname, '../public/uploads/photos')));
 
-// Iniciar servidor
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
+
 const volunteerRoutes = require('./routes/volunteers/index');
 app.use('/api/volunteers', volunteerRoutes);
 

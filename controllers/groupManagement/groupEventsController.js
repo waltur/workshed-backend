@@ -19,8 +19,6 @@ const createEvent = async (req, res) => {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
-
-
   let startDate = new Date(start);
   let endDate = end ? new Date(end) : null;
 
@@ -53,7 +51,7 @@ const createEvent = async (req, res) => {
 
       events.push(result.rows[0]);
 
-      // 👉 Avanzar fechas
+      // avanzar recurrencia
       if (repeatType === 'weekly') {
         startDate.setDate(startDate.getDate() + 7);
         if (endDate) endDate.setDate(endDate.getDate() + 7);
@@ -65,6 +63,13 @@ const createEvent = async (req, res) => {
       }
     }
 
+    // 🔥 SOCKET.IO
+    const io = req.app.get('io');
+
+    // ✅ emitir correctamente TODOS los eventos
+     io.emit('eventsCreated', events);
+
+    // ✅ responder
     res.status(201).json(events.length === 1 ? events[0] : events);
 
   } catch (error) {
@@ -75,9 +80,10 @@ const createEvent = async (req, res) => {
 // 🔁 Actualizar eventos recurrentes (single | from | all)
 const updateEventSeries = async (req, res) => {
   const { series_id } = req.params;
+
   const {
-    scope = 'all',       // 'single' | 'from' | 'all'
-    fromDate = null,     // requerido solo para 'from'
+    scope = 'all', // 'from' | 'all'
+    fromDate = null,
     title,
     description,
     start,
@@ -86,96 +92,111 @@ const updateEventSeries = async (req, res) => {
     location
   } = req.body;
 
-  if (!seriesId) {
-    return res.status(400).json({ error: 'Missing seriesId' });
+  if (!series_id) {
+    return res.status(400).json({ error: 'Missing series_id' });
   }
 
-  if (!title || !start) {
-    return res.status(400).json({ error: 'Missing required fields' });
-  }
-
-  let query = '';
-  let values = [];
+  const client = await pool.connect();
 
   try {
-    // 🔹 SOLO ESTE EVENTO (seguridad extra, normalmente se usa updateEvent)
-    if (scope === 'single') {
+    await client.query('BEGIN');
+
+    // 🔥 Validar existencia
+    const exists = await client.query(
+      `SELECT 1 FROM group_management.group_events WHERE series_id = $1 LIMIT 1`,
+      [series_id]
+    );
+
+    if (exists.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Series not found' });
+    }
+
+    // 🔥 Validar fechas
+    if (start && end && new Date(end) < new Date(start)) {
+      await client.query('ROLLBACK');
       return res.status(400).json({
-        error: 'Use updateEvent endpoint for single event updates'
+        error: 'End date cannot be before start'
       });
     }
 
-    // 🔹 TODOS LOS EVENTOS DE LA SERIE
-    if (scope === 'all') {
-      query = `
-        UPDATE group_management.group_events
-        SET title = $1,
-            description = $2,
-            start = $3,
-            "end" = $4,
-            id_group = $5,
-            location = $6
-        WHERE series_id = $7
-        RETURNING *
-      `;
-      values = [
-        title,
-        description,
-        start,
-        end,
-        id_group,
-        location,
-        series_id
-      ];
-    }
+    let result;
 
-    // 🔹 ESTE Y LOS SIGUIENTES
+    // 🔥 SHIFT (clave para recurrencia)
     if (scope === 'from') {
       if (!fromDate) {
+        await client.query('ROLLBACK');
         return res.status(400).json({
-          error: 'fromDate is required when scope is "from"'
+          error: 'fromDate is required for scope=from'
         });
       }
 
-      query = `
+      result = await client.query(
+        `
         UPDATE group_management.group_events
-        SET title = $1,
-            description = $2,
-            start = $3,
-            "end" = $4,
-            id_group = $5,
-            location = $6
+        SET
+          title = COALESCE($1, title),
+          description = COALESCE($2, description),
+          start = CASE
+            WHEN $3 IS NOT NULL THEN start + ($3::timestamp - start)
+            ELSE start
+          END,
+          "end" = CASE
+            WHEN $4 IS NOT NULL THEN "end" + ($4::timestamp - "end")
+            ELSE "end"
+          END,
+          id_group = COALESCE($5, id_group),
+          location = COALESCE($6, location)
         WHERE series_id = $7
           AND start >= $8
         RETURNING *
-      `;
-      values = [
-        title,
-        description,
-        start,
-        end,
-        id_group,
-        location,
-        series_id,
-        fromDate
-      ];
+        `,
+        [title, description, start, end, id_group, location, series_id, fromDate]
+      );
     }
 
-    const result = await pool.query(query, values);
-
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'No events updated' });
+    else if (scope === 'all') {
+      result = await client.query(
+        `
+        UPDATE group_management.group_events
+        SET
+          title = COALESCE($1, title),
+          description = COALESCE($2, description),
+          id_group = COALESCE($3, id_group),
+          location = COALESCE($4, location)
+        WHERE series_id = $5
+        RETURNING *
+        `,
+        [title, description, id_group, location, series_id]
+      );
     }
+
+    await client.query('COMMIT');
+
+    // 🚀 SOCKET.IO
+    const io = req.app.get('io');
+
+    io.emit('eventSeriesUpdated', {
+      series_id,
+      scope,
+      fromDate
+    });
 
     res.json({
-      message: 'Event series updated successfully',
+      message: 'Series updated successfully',
       updated: result.rowCount,
       events: result.rows
     });
 
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('Error updating event series:', err);
-    res.status(500).json({ error: 'Failed to update event series' });
+
+    res.status(500).json({
+      error: 'Failed to update series'
+    });
+  } finally {
+    client.release();
   }
 };
 
@@ -197,7 +218,6 @@ const getEventsByGroup = async (req, res) => {
 const getAllEvents = async (req, res) => {
   try {
     const { contactId } = req.query;
-    console.log('Received id_contact:', contactId);
 
     const query = `
       SELECT
@@ -214,14 +234,21 @@ const getAllEvents = async (req, res) => {
         -- Firma
         s.signature,
 
-        -- Roles
-        CASE WHEN a.id_contact IS NOT NULL THEN 'Attendant' ELSE NULL END AS is_attending,
-        CASE WHEN i.id_contact IS NOT NULL THEN 'Coordinator' ELSE NULL END AS is_instructor,
-        CASE WHEN h.id_contact IS NOT NULL THEN 'General Support' ELSE NULL END AS is_support,
+        -- Roles del usuario
+        CASE WHEN a.id_contact IS NOT NULL THEN 'Attendant' END AS is_attending,
+        CASE WHEN i.id_contact IS NOT NULL THEN 'Coordinator' END AS is_instructor,
+        CASE WHEN h.id_contact IS NOT NULL THEN 'General Support' END AS is_support,
 
         COALESCE(a.attended, false) AS attended,
 
-        -- 🔥 Tasks en una sola columna JSON
+        -- 🔥 Coordinator real desde DB
+        MAX(
+          CASE
+            WHEN gr.name_role = 'Coordinator' THEN c.name
+          END
+        ) AS coordinator_name,
+
+        -- 🔥 Tasks
         COALESCE(
           json_agg(
             DISTINCT jsonb_build_object(
@@ -250,9 +277,21 @@ const getAllEvents = async (req, res) => {
       LEFT JOIN group_management.event_helpers h
         ON h.id_event = e.id_event AND h.id_contact = $1
 
-      -- 🔥 JOIN de tasks (clave)
+      -- tasks
       LEFT JOIN group_management.event_tasks t
         ON t.id_event = e.id_event
+
+      -- miembros
+      LEFT JOIN group_management.group_members gm
+        ON gm.id_group = e.id_group
+
+      -- roles (CORRECTO 🔥)
+      LEFT JOIN group_management.group_roles gr
+        ON gr.id_group_role = gm.id_group_role
+
+      -- contactos
+      LEFT JOIN contacts.contacts c
+        ON c.id_contact = gm.id_contact
 
       GROUP BY
         e.series_id,
@@ -294,8 +333,8 @@ const getAllEvents = async (req, res) => {
 
       attended: row.attended,
       signature: row.signature,
+      coordinator: row.coordinator_name || 'N/A',
 
-      // 🔥 ya viene directo del SQL
       tasks: row.tasks
     }));
 
@@ -309,124 +348,227 @@ const getAllEvents = async (req, res) => {
 
 const deleteEvent = async (req, res) => {
   const { id } = req.params;
-
-  try {
-    // Verificar si hay timesheets asociados
-    const timesheets = await pool.query(
-      `SELECT 1 FROM group_management.group_timesheets WHERE id_event = $1 LIMIT 1`,
-      [id]
-    );
-
-    // Verificar si hay asistentes asociados
-    const attendees = await pool.query(
-      `SELECT 1 FROM group_management.event_attendees WHERE id_event = $1 LIMIT 1`,
-      [id]
-    );
-
-    if (timesheets.rowCount > 0 || attendees.rowCount > 0) {
-      return res.status(409).json({
-        error: 'This event has related timesheets or attendees. Confirm deletion with cascade.'
-      });
-    }
-
-    const result = await pool.query(
-      `DELETE FROM group_management.group_events WHERE id_event = $1 RETURNING *`,
-      [id]
-    );
-
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'Event not found' });
-    }
-
-    res.json({ message: 'Event deleted successfully' });
-
-  } catch (err) {
-    console.error('Error deleting event:', err);
-    res.status(500).json({ error: 'Failed to delete event' });
-  }
-};
-
-const deleteEventCascade = async (req, res) => {
-  const { id } = req.params;
-
+  const { cascade = false } = req.query; // 🔥 control desde frontend
   const client = await pool.connect();
+
   try {
     await client.query('BEGIN');
 
-    // Eliminar asistentes del evento
-    await client.query(
-      `DELETE FROM group_management.event_attendees WHERE id_event = $1`,
+    // 🔥 Validar existencia + relaciones en UNA sola query
+    const check = await client.query(
+      `
+      SELECT
+        e.id_event,
+        EXISTS (
+          SELECT 1 FROM group_management.group_timesheets t
+          WHERE t.id_event = e.id_event
+        ) AS has_timesheets,
+        EXISTS (
+          SELECT 1 FROM group_management.event_attendees a
+          WHERE a.id_event = e.id_event
+        ) AS has_attendees
+      FROM group_management.group_events e
+      WHERE e.id_event = $1
+      `,
       [id]
     );
 
-    // Eliminar timesheets relacionados
-    await client.query(
-      `DELETE FROM group_management.group_timesheets WHERE id_event = $1`,
-      [id]
-    );
-
-    // Eliminar tareas del evento
-    await client.query(
-      `DELETE FROM group_management.event_tasks WHERE id_event = $1`,
-      [id]
-    );
-
-    // Finalmente eliminar el evento
-    const result = await client.query(
-      `DELETE FROM group_management.group_events WHERE id_event = $1 RETURNING *`,
-      [id]
-    );
-
-    if (result.rowCount === 0) {
+    if (check.rowCount === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Event not found' });
     }
 
+    const { has_timesheets, has_attendees } = check.rows[0];
+
+    // 🔥 Si hay relaciones y NO es cascade → bloquear
+    if ((has_timesheets || has_attendees) && cascade !== 'true') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'Event has related data',
+        has_timesheets,
+        has_attendees
+      });
+    }
+
+    // 🔥 Cascade delete (orden correcto)
+    if (cascade === 'true') {
+      await client.query(
+        `DELETE FROM group_management.group_timesheets WHERE id_event = $1`,
+        [id]
+      );
+
+      await client.query(
+        `DELETE FROM group_management.event_attendees WHERE id_event = $1`,
+        [id]
+      );
+    }
+
+    // 🔥 Eliminar evento
+    const deleted = await client.query(
+      `DELETE FROM group_management.group_events WHERE id_event = $1 RETURNING *`,
+      [id]
+    );
+
     await client.query('COMMIT');
-    res.json({ message: 'Event and all related records deleted successfully' });
+
+    // 🚀 SOCKET.IO (REALTIME)
+    const io = req.app.get('io');
+    io.emit('eventDeleted', {
+      id_event: id,
+      series_id: deleted.rows[0].series_id
+    });
+
+    res.json({
+      message: 'Event deleted successfully',
+      event: deleted.rows[0]
+    });
 
   } catch (err) {
     await client.query('ROLLBACK');
-    console.error('Error deleting event cascade:', err);
-    res.status(500).json({ error: 'Failed to delete event and related data' });
+    console.error('Error deleting event:', err);
+
+    res.status(500).json({
+      error: 'Failed to delete event'
+    });
   } finally {
     client.release();
   }
 };
 
+
+
 const updateEvent = async (req, res) => {
   const { id } = req.params;
-  const { title, description, start, end, id_group, location } = req.body;
+  const {
+    title,
+    description,
+    start,
+    end,
+    id_group,
+    location,
+    scope = 'single', // 🔥 single | future | all
+    series_id,
+    fromDate
+  } = req.body;
 
-  if (!title || !start) {
-    return res.status(400).json({ error: 'Missing required fields' });
-  }
+  const client = await pool.connect();
 
   try {
-    const result = await pool.query(
-      `
-      UPDATE group_management.group_events
-      SET title = $1,
-          description = $2,
-          start = $3,
-          "end" = $4,
-          id_group = $5,
-          location = $6
-      WHERE id_event = $7
-      RETURNING *
-      `,
-      [title, description, start, end, id_group, location, id]
+    await client.query('BEGIN');
+
+    // 🔥 Validar existencia
+    const existing = await client.query(
+      `SELECT * FROM group_management.group_events WHERE id_event = $1`,
+      [id]
     );
 
-    if (result.rowCount === 0) {
+    if (existing.rowCount === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Event not found' });
     }
 
-    res.json(result.rows[0]);
+    const current = existing.rows[0];
+
+    // 🔥 Validación fechas
+    if (start && end && new Date(end) < new Date(start)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: 'End date cannot be before start date'
+      });
+    }
+
+    let updated;
+
+    // 🔥 CASO 1: SOLO ESTE EVENTO
+    if (scope === 'single') {
+      updated = await client.query(
+        `
+        UPDATE group_management.group_events
+        SET title = COALESCE($1, title),
+            description = COALESCE($2, description),
+            start = COALESCE($3, start),
+            "end" = COALESCE($4, "end"),
+            id_group = COALESCE($5, id_group),
+            location = COALESCE($6, location)
+        WHERE id_event = $7
+        RETURNING *
+        `,
+        [title, description, start, end, id_group, location, id]
+      );
+    }
+
+    // 🔥 CASO 2: ESTE Y FUTUROS
+    else if (scope === 'future') {
+      if (!series_id || !fromDate) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          error: 'series_id and fromDate required for future updates'
+        });
+      }
+
+      updated = await client.query(
+        `
+        UPDATE group_management.group_events
+        SET title = COALESCE($1, title),
+            description = COALESCE($2, description),
+            start = start + ($3::timestamp - start),
+            "end" = "end" + ($4::timestamp - "end"),
+            location = COALESCE($5, location)
+        WHERE series_id = $6
+          AND start >= $7
+        RETURNING *
+        `,
+        [title, description, start, end, location, series_id, fromDate]
+      );
+    }
+
+    // 🔥 CASO 3: TODOS LOS EVENTOS
+    else if (scope === 'all') {
+      if (!series_id) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          error: 'series_id required for full update'
+        });
+      }
+
+      updated = await client.query(
+        `
+        UPDATE group_management.group_events
+        SET title = COALESCE($1, title),
+            description = COALESCE($2, description),
+            location = COALESCE($3, location)
+        WHERE series_id = $4
+        RETURNING *
+        `,
+        [title, description, location, series_id]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    // 🚀 SOCKET.IO (REALTIME)
+    const io = req.app.get('io');
+
+    io.emit('eventUpdated', {
+      id_event: id,
+      series_id: series_id || current.series_id,
+      scope
+    });
+
+    res.json({
+      message: 'Event(s) updated successfully',
+      events: updated.rows
+    });
 
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('Error updating event:', err);
-    res.status(500).json({ error: 'Failed to update event' });
+
+    res.status(500).json({
+      error: 'Failed to update event'
+    });
+  } finally {
+    client.release();
   }
 };
 
@@ -526,4 +668,4 @@ console.log("getMyEventsCount");
     res.status(500).json({ error: 'Failed to count events' });
   }
 };
-module.exports = { createEvent, getEventsByGroup, getAllEvents, deleteEvent, updateEvent,updateEventSeries, deleteTasksByEventId, getEventRegistrations, updateAttendance,saveSignature,deleteEventCascade, getMyEventsCount };
+module.exports = { createEvent, getEventsByGroup, getAllEvents, deleteEvent, updateEvent,updateEventSeries, deleteTasksByEventId, getEventRegistrations, updateAttendance,saveSignature, getMyEventsCount };

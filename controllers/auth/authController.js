@@ -43,12 +43,13 @@ console.log('PHOTO URL RECEIVED:', photo_url);
       req.body.photo_permission,
       req.body.community_preference,
       req.body.wants_to_volunteer,
-      req.body.acknowledged_rules,
-      req.body.acknowledged_privacy,
-      req.body.acknowledged_code_of_conduct,
-      req.body.acknowledged_health_safety,
+      req.body.accept_membership_policy,
+      req.body.accept_privacy_full,
+      req.body.accept_code_full,
+      req.body.accept_health_full,
       req.body.volunteer_acknowledgement || null
     ]);
+
     // 2. Crear usuario
     const hash = await bcrypt.hash(password, 10);
     const userResult = await pool.query(

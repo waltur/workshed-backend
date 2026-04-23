@@ -348,39 +348,114 @@ const getAllEvents = async (req, res) => {
 
 const deleteEvent = async (req, res) => {
   const { id } = req.params;
-  const { cascade = false } = req.query; // 🔥 control desde frontend
+  const { cascade = 'false', deleteSeries = 'false' } = req.query;
+
   const client = await pool.connect();
 
   try {
     await client.query('BEGIN');
 
-    // 🔥 Validar existencia + relaciones en UNA sola query
-    const check = await client.query(
-      `
-      SELECT
-        e.id_event,
-        EXISTS (
-          SELECT 1 FROM group_management.group_timesheets t
-          WHERE t.id_event = e.id_event
-        ) AS has_timesheets,
-        EXISTS (
-          SELECT 1 FROM group_management.event_attendees a
-          WHERE a.id_event = e.id_event
-        ) AS has_attendees
-      FROM group_management.group_events e
-      WHERE e.id_event = $1
-      `,
+    // 🔍 Obtener evento + serie
+    const eventResult = await client.query(
+      `SELECT * FROM group_management.group_events WHERE id_event = $1`,
       [id]
     );
 
-    if (check.rowCount === 0) {
+    if (eventResult.rowCount === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Event not found' });
     }
 
+    const event = eventResult.rows[0];
+    const { series_id } = event;
+
+    // 🔥 CASO: ELIMINAR TODA LA SERIE
+    if (deleteSeries === 'true' && series_id) {
+
+      // validar relaciones en toda la serie
+      const checkSeries = await client.query(
+        `
+        SELECT
+          EXISTS (
+            SELECT 1 FROM group_management.group_timesheets t
+            JOIN group_management.group_events e ON e.id_event = t.id_event
+            WHERE e.series_id = $1
+          ) AS has_timesheets,
+          EXISTS (
+            SELECT 1 FROM group_management.event_attendees a
+            JOIN group_management.group_events e ON e.id_event = a.id_event
+            WHERE e.series_id = $1
+          ) AS has_attendees
+        `,
+        [series_id]
+      );
+
+      const { has_timesheets, has_attendees } = checkSeries.rows[0];
+
+      if ((has_timesheets || has_attendees) && cascade !== 'true') {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: 'Series has related data',
+          has_timesheets,
+          has_attendees
+        });
+      }
+
+      if (cascade === 'true') {
+        await client.query(
+          `
+          DELETE FROM group_management.group_timesheets
+          WHERE id_event IN (
+            SELECT id_event FROM group_management.group_events WHERE series_id = $1
+          )
+          `,
+          [series_id]
+        );
+
+        await client.query(
+          `
+          DELETE FROM group_management.event_attendees
+          WHERE id_event IN (
+            SELECT id_event FROM group_management.group_events WHERE series_id = $1
+          )
+          `,
+          [series_id]
+        );
+      }
+
+      await client.query(
+        `DELETE FROM group_management.group_events WHERE series_id = $1`,
+        [series_id]
+      );
+
+      await client.query('COMMIT');
+
+      const io = req.app.get('io');
+      io.emit('eventSeriesDeleted', { series_id });
+
+      return res.json({
+        message: 'Series deleted successfully',
+        series_id
+      });
+    }
+
+    // 🔥 CASO: SOLO UN EVENTO (tu lógica actual mejorada)
+
+    const check = await client.query(
+      `
+      SELECT
+        EXISTS (
+          SELECT 1 FROM group_management.group_timesheets WHERE id_event = $1
+        ) AS has_timesheets,
+        EXISTS (
+          SELECT 1 FROM group_management.event_attendees WHERE id_event = $1
+        ) AS has_attendees
+      `,
+      [id]
+    );
+
     const { has_timesheets, has_attendees } = check.rows[0];
 
-    // 🔥 Si hay relaciones y NO es cascade → bloquear
     if ((has_timesheets || has_attendees) && cascade !== 'true') {
       await client.query('ROLLBACK');
       return res.status(409).json({
@@ -390,7 +465,6 @@ const deleteEvent = async (req, res) => {
       });
     }
 
-    // 🔥 Cascade delete (orden correcto)
     if (cascade === 'true') {
       await client.query(
         `DELETE FROM group_management.group_timesheets WHERE id_event = $1`,
@@ -403,7 +477,6 @@ const deleteEvent = async (req, res) => {
       );
     }
 
-    // 🔥 Eliminar evento
     const deleted = await client.query(
       `DELETE FROM group_management.group_events WHERE id_event = $1 RETURNING *`,
       [id]
@@ -411,11 +484,11 @@ const deleteEvent = async (req, res) => {
 
     await client.query('COMMIT');
 
-    // 🚀 SOCKET.IO (REALTIME)
+    // 🚀 SOCKET
     const io = req.app.get('io');
     io.emit('eventDeleted', {
       id_event: id,
-      series_id: deleted.rows[0].series_id
+      series_id
     });
 
     res.json({
@@ -434,8 +507,6 @@ const deleteEvent = async (req, res) => {
     client.release();
   }
 };
-
-
 
 const updateEvent = async (req, res) => {
   const { id } = req.params;

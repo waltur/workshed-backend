@@ -17,87 +17,303 @@ const fs = require('fs');
 
 
 const register = async (req, res) => {
-console.log("register");
-  const { name, phone_number, email, username, password, roles, job_roles = [], emergency_contact, photo_url } = req.body;
 
-console.log('PHOTO URL RECEIVED:', photo_url);
+  const {
+    name,
+    phone_number,
+    email,
+    username,
+    password,
+    roles,
+    job_roles = [],
+    emergency_contact,
+    photo_url,
+
+    paypal_order_id,
+    paypal_capture_id,
+
+
+
+  } = req.body;
+
+  const client = await pool.connect();
+
   try {
-    // 1. Crear contacto
-    const sanitizedEmergencyContact = emergency_contact === '' ? null : emergency_contact;
-    const contactResult = await pool.query(
-      `INSERT INTO contacts.contacts (name, email, phone_number, type, photo_url, emergency_contact)
-       VALUES ($1, $2, $3, $4, $5, $6 ) RETURNING id_contact`,
-      [name, email, phone_number, 'Person', photo_url || null, sanitizedEmergencyContact]
+    const MEMBERSHIP_AMOUNT =
+    Number(process.env.MEMBERSHIP_AMOUNT || 1);
+    await client.query('BEGIN');
+
+    const payment_required =
+        !!paypal_order_id &&
+        !!paypal_capture_id;
+    //===================================================
+    // VALIDAR PAGO PAYPAL SI ES NECESARIO
+    //===================================================
+
+    console.log("========== PAYMENT DATA ==========");
+    console.log({
+      payment_required,
+      MEMBERSHIP_AMOUNT,
+      paypal_order_id,
+      paypal_capture_id
+    });
+    console.log("==================================");
+    if (payment_required) {
+
+      if (!paypal_order_id || !paypal_capture_id) {
+        throw new Error('Membership payment is required.');
+      }
+
+      const existingPayment = await client.query(
+        `
+        SELECT *
+        FROM membership.payments
+        WHERE paypal_capture_id=$1
+        `,
+        [paypal_capture_id]
+      );
+
+      if (existingPayment.rows.length > 0) {
+        throw new Error('This PayPal payment has already been used.');
+      }
+
+    }
+
+    //--------------------------------------------------
+    // CONTACT
+    //--------------------------------------------------
+
+    const sanitizedEmergencyContact =
+      emergency_contact === '' ? null : emergency_contact;
+
+    const contactResult = await client.query(
+      `
+      INSERT INTO contacts.contacts
+      (
+        name,
+        email,
+        phone_number,
+        type,
+        photo_url,
+        emergency_contact
+      )
+      VALUES
+      ($1,$2,$3,$4,$5,$6)
+      RETURNING id_contact
+      `,
+      [
+        name,
+        email,
+        phone_number,
+        'Person',
+        photo_url || null,
+        sanitizedEmergencyContact
+      ]
     );
+
     const id_contact = contactResult.rows[0].id_contact;
 
-    await pool.query(`
-      INSERT INTO membership.membership_forms (
-        id_contact, age_range, photo_permission, community_preference,
-        wants_to_volunteer, acknowledged_rules, acknowledged_privacy,
-        acknowledged_code_of_conduct, acknowledged_health_safety, volunteer_acknowledgement
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-    `, [
-      id_contact,
-      req.body.age_range,
-      req.body.photo_permission,
-      req.body.community_preference,
-      req.body.wants_to_volunteer,
-      req.body.accept_membership_policy,
-      req.body.accept_privacy_full,
-      req.body.accept_code_full,
-      req.body.accept_health_full,
-      req.body.volunteer_acknowledgement || null
-    ]);
+    //--------------------------------------------------
+    // MEMBERSHIP FORM
+    //--------------------------------------------------
 
-    // 2. Crear usuario
-    const hash = await bcrypt.hash(password, 10);
-    const userResult = await pool.query(
-      `INSERT INTO auth.users (username, email, password_hash, id_contact, is_active)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id_user`,
-      [username, email, hash, id_contact,'1']
+    await client.query(
+      `
+      INSERT INTO membership.membership_forms
+      (
+        id_contact,
+        age_range,
+        photo_permission,
+        community_preference,
+        wants_to_volunteer,
+        acknowledged_rules,
+        acknowledged_privacy,
+        acknowledged_code_of_conduct,
+        acknowledged_health_safety,
+        volunteer_acknowledgement
+      )
+      VALUES
+      ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      `,
+      [
+        id_contact,
+        req.body.age_range,
+        req.body.photo_permission,
+        req.body.community_preference,
+        req.body.wants_to_volunteer,
+        req.body.accept_membership_policy,
+        req.body.accept_privacy_full,
+        req.body.accept_code_full,
+        req.body.accept_health_full,
+        req.body.volunteer_acknowledgement || null
+      ]
     );
+
+    //--------------------------------------------------
+    // USER
+    //--------------------------------------------------
+
+    const hash = await bcrypt.hash(password, 10);
+
+    const userResult = await client.query(
+      `
+      INSERT INTO auth.users
+      (
+        username,
+        email,
+        password_hash,
+        id_contact,
+        is_active
+      )
+      VALUES
+      ($1,$2,$3,$4,$5)
+      RETURNING id_user
+      `,
+      [
+        username,
+        email,
+        hash,
+        id_contact,
+        true
+      ]
+    );
+
     const userId = userResult.rows[0].id_user;
 
-    try {
-      await sendVerificationEmail(userId, email);
-    } catch (err) {
-      console.error('Email verification failed, but user was created:', err);
-    }
+    //--------------------------------------------------
+    // ROLES
+    //--------------------------------------------------
 
-    // 3. Asignar roles
     for (const roleId of roles) {
-      await pool.query(
-        `INSERT INTO auth.user_roles (id_user, id_role) VALUES ($1, $2)`,
+
+      await client.query(
+        `
+        INSERT INTO auth.user_roles
+        (id_user,id_role)
+        VALUES($1,$2)
+        `,
         [userId, roleId]
       );
-    }
-    /*const hasVolunteerRole = roles.some(roleId => {
-      return pool.query(`SELECT role_name FROM auth.roles WHERE id_role = $1`, [roleId])
-        .then(res => res.rows[0]?.name === 'volunteer');
-    });*/
-    const volunteerRoleResult = await pool.query(
-      `SELECT id_role FROM auth.roles WHERE LOWER(role_name) = 'volunteer'`
-    );
-    const volunteerRoleId = volunteerRoleResult.rows[0]?.id_role;
-    const hasVolunteerRole = volunteerRoleId
-    ? roles.includes(volunteerRoleId)
-     : false;
-    if (hasVolunteerRole && job_roles.length > 0) {
-      for (const jobId of job_roles) {
-        await pool.query(
-          `INSERT INTO contacts.contact_job_role (id_contact, id_job_role)
-           VALUES ($1, $2)`,
-          [id_contact, jobId]
-        );
-      }
+
     }
 
-    res.status(201).json({ message: 'User created successfully' });
-  } catch (err) {
-    console.error('Register error:', err);
-    res.status(500).json({ error: 'Registration failed' });
+    //--------------------------------------------------
+    // VOLUNTEER FUNCTIONS
+    //--------------------------------------------------
+
+    const volunteerRoleResult = await client.query(
+      `
+      SELECT id_role
+      FROM auth.roles
+      WHERE LOWER(role_name)='volunteer'
+      `
+    );
+
+    const volunteerRoleId =
+      volunteerRoleResult.rows[0]?.id_role;
+
+    const hasVolunteerRole =
+      volunteerRoleId
+        ? roles.includes(volunteerRoleId)
+        : false;
+
+    if (hasVolunteerRole && job_roles.length > 0) {
+
+      for (const jobId of job_roles) {
+
+        await client.query(
+          `
+          INSERT INTO contacts.contact_job_role
+          (
+            id_contact,
+            id_job_role
+          )
+          VALUES($1,$2)
+          `,
+          [id_contact, jobId]
+        );
+
+      }
+
+    }
+
+    //--------------------------------------------------
+    // SAVE PAYMENT
+    //--------------------------------------------------
+
+    if (payment_required) {
+
+      await client.query(
+        `
+        INSERT INTO membership.payments
+        (
+          id_contact,
+          amount,
+          currency,
+          payment_status,
+          paypal_order_id,
+          paypal_capture_id,
+          paid_at,
+          membership_year
+        )
+        VALUES
+        (
+          $1,
+          $2,
+          'AUD',
+          'completed',
+          $3,
+          $4,
+          NOW(),
+          EXTRACT(YEAR FROM NOW())
+        )
+        `,
+        [
+          id_contact,
+          MEMBERSHIP_AMOUNT,
+          paypal_order_id,
+          paypal_capture_id
+        ]
+      );
+
+    }
+
+    //--------------------------------------------------
+
+    await client.query('COMMIT');
+
+    try {
+
+      await sendVerificationEmail(userId, email);
+
+    } catch (err) {
+
+      console.error(err);
+
+    }
+
+    res.status(201).json({
+      message: 'User created successfully'
+    });
+
   }
+  catch (err) {
+
+    await client.query('ROLLBACK');
+
+    console.error(err);
+
+    res.status(500).json({
+      error: err.message
+    });
+
+  }
+  finally {
+
+    client.release();
+
+  }
+
 };
 
 const login = async (req, res) => {

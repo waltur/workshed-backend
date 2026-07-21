@@ -8,23 +8,88 @@ const createOrder = async (req, res) => {
     const { amount } = req.body;
 
     const token = await getAccessToken();
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const membershipName = `Annual Membership ${currentYear}`;
+    const validUntil =  `31 January ${currentYear + 1}`;
+    const invoiceId = `WS-${new Date().getFullYear()}-${Date.now()}`;
+    const handlingFee = Number(process.env.MEMBERSHIP_HANDLING_FEE);
+    const total = Number(amount) + handlingFee;
 
     const response = await axios.post(
       `${process.env.PAYPAL_BASE_URL}/v2/checkout/orders`,
       {
-        intent: 'CAPTURE',
+        intent: "CAPTURE",
+
         purchase_units: [
           {
+
+            reference_id: "membership",
+
+            invoice_id: invoiceId,
+
+            description: `Annual Membership ${currentYear} - The Workshed Inner West Inc.`,
+
             amount: {
-              currency_code: 'AUD',
-              value: amount
-            }
+
+              currency_code: "AUD",
+
+              value: total.toFixed(2),
+
+              breakdown: {
+
+                item_total: {
+
+                  currency_code: "AUD",
+
+                  value: Number(amount).toFixed(2)
+
+                },
+
+                handling: {
+
+                  currency_code: "AUD",
+
+                  value: handlingFee.toFixed(2)
+
+                }
+
+              }
+
+            },
+
+            items: [
+              {
+
+                name: membershipName,
+
+                description: `Membership valid until ${validUntil}`,
+
+                sku: `MEMBERSHIP-${currentYear}`,
+
+                quantity: "1",
+
+                category: "DIGITAL_GOODS",
+
+                unit_amount: {
+
+                  currency_code: "AUD",
+
+                  value: Number(amount).toFixed(2)
+
+                }
+
+              }
+            ]
+
           }
         ]
+
       },
       {
         headers: {
-          Authorization: `Bearer ${token}`
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
         }
       }
     );
@@ -32,9 +97,15 @@ const createOrder = async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
+
     console.error(error.response?.data || error);
-    res.status(500).json({ error: 'Unable to create order' });
+
+    res.status(500).json({
+      error: "Unable to create order"
+    });
+
   }
+
 };
 
 const captureOrder = async (req, res) => {

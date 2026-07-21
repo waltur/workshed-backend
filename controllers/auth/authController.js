@@ -254,7 +254,8 @@ const register = async (req, res) => {
           paypal_order_id,
           paypal_capture_id,
           paid_at,
-          membership_year
+          membership_year,
+          payment_method
         )
         VALUES
         (
@@ -265,7 +266,8 @@ const register = async (req, res) => {
           $3,
           $4,
           NOW(),
-          EXTRACT(YEAR FROM NOW())
+          EXTRACT(YEAR FROM NOW()),
+          'other'
         )
         `,
         [

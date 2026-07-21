@@ -100,6 +100,73 @@ const getUserById = async (req, res) => {
 
       job_roles = jobRolesResult.rows.map(r => r.id_job_role);
     }
+const membershipResult = await pool.query(
+        ` SELECT
+        age_range,
+        photo_permission,
+        community_preference,
+        wants_to_volunteer,
+        acknowledged_rules,
+        acknowledged_privacy,
+        acknowledged_code_of_conduct,
+        acknowledged_health_safety,
+        volunteer_acknowledgement,
+        created_at
+        FROM membership.membership_forms
+        WHERE id_contact=$1 `,
+[user.id_contact]
+);
+
+const membership =
+membershipResult.rows[0] || null;
+
+const paymentResult = await pool.query(
+` SELECT
+        amount,
+        currency,
+        payment_status,
+        payment_method,
+        membership_year,
+        paid_at,
+        paypal_order_id,
+        paypal_capture_id
+        FROM membership.payments
+        WHERE id_contact=$1
+        ORDER BY paid_at DESC
+        LIMIT 1
+        `,
+        [user.id_contact]
+        );
+
+        const payment =
+paymentResult.rows[0] || null;
+
+const paymentHistoryResult = await pool.query(
+        `
+        SELECT
+        id_payment,
+        amount,
+        currency,
+        payment_status,
+        payment_method,
+        membership_year,
+        paid_at
+        FROM membership.payments
+        WHERE id_contact=$1
+        ORDER BY paid_at DESC
+        `,
+        [user.id_contact]
+        );
+
+        const paymentHistory =
+        paymentHistoryResult.rows;
+
+    console.log(JSON.stringify({
+      user,
+      membership,
+      payment,
+      paymentHistory
+    }, null, 2));
 
     // 3. Devolver todo
     res.json({
@@ -113,8 +180,12 @@ const getUserById = async (req, res) => {
       roles: user.roles,
       emergency_contact: user.emergency_contact,
       photo_url:user.photo_url,
-      job_roles // ✅ devuelto como array de números
+      job_roles, // ✅ devuelto como array de números
+      membership,
+      payment,
+      paymentHistory
     });
+
 
   } catch (err) {
     console.error('Error getting user:', err);

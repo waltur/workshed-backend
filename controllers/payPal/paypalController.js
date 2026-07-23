@@ -150,32 +150,6 @@ const captureOrder = async (req, res) => {
         error: 'Capture information not found.'
         });
     }
-    /*await pool.query(
-      `
-      INSERT INTO membership.payments
-      (
-        id_contact,
-        amount,
-        currency,
-        payment_status,
-        paypal_order_id,
-        paypal_capture_id,
-        paid_at,
-        membership_year
-      )
-      VALUES
-      ($1,$2,$3,$4,$5,$6,NOW(),$7)
-      `,
-      [
-        id_contact,
-        capture.amount.value,
-        capture.amount.currency_code,
-        'completed',
-        paypalData.id,
-        capture.id,
-        new Date().getFullYear()
-      ]
-    );*/
 
     res.json({
       success: true,

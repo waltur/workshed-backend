@@ -240,46 +240,88 @@ const register = async (req, res) => {
     //--------------------------------------------------
     // SAVE PAYMENT
     //--------------------------------------------------
-
+    let id_payment = null;
     if (payment_required) {
 
-      await client.query(
-        `
-        INSERT INTO membership.payments
-        (
-          id_contact,
-          amount,
-          currency,
-          payment_status,
-          paypal_order_id,
-          paypal_capture_id,
-          paid_at,
-          membership_year,
-          payment_method
-        )
-        VALUES
-        (
-          $1,
-          $2,
-          'AUD',
-          'completed',
-          $3,
-          $4,
-          NOW(),
-          EXTRACT(YEAR FROM NOW()),
-          'other'
-        )
-        `,
-        [
-          id_contact,
-          MEMBERSHIP_AMOUNT,
-          paypal_order_id,
-          paypal_capture_id
-        ]
-      );
+     const paymentResult = await client.query(
+     `
+     INSERT INTO membership.payments
+     (
+         id_contact,
+         amount,
+         currency,
+         payment_status,
+         paypal_order_id,
+         paypal_capture_id,
+         paid_at,
+         membership_year,
+         payment_method
+     )
+     VALUES
+     (
+         $1,
+         $2,
+         'AUD',
+         'completed',
+         $3,
+         $4,
+         NOW(),
+         EXTRACT(YEAR FROM NOW()),
+         'paypal'
+     )
+     RETURNING id_payment
+     `,
+     [
+         id_contact,
+         MEMBERSHIP_AMOUNT,
+         paypal_order_id,
+         paypal_capture_id
+     ]
+     );
+
+      id_payment = paymentResult.rows[0].id_payment;
 
     }
+    //--------------------------------------------------
+    // CREATE MEMBERSHIP
+    //--------------------------------------------------
 
+    const startDate = new Date();
+
+    const endDate = new Date(startDate);
+
+    endDate.setFullYear(
+        endDate.getFullYear() + 1
+    );
+
+    await client.query(
+    `
+    INSERT INTO membership.memberships
+    (
+        id_contact,
+        id_payment,
+        membership_type,
+        start_date,
+        end_date,
+        status
+    )
+    VALUES
+    (
+        $1,
+        $2,
+        'Annual',
+        $3,
+        $4,
+        'active'
+    )
+    `,
+    [
+        id_contact,
+        id_payment,
+        startDate,
+        endDate
+    ]
+    );
     //--------------------------------------------------
 
     await client.query('COMMIT');

@@ -4,21 +4,84 @@ const jwt = require('jsonwebtoken');
 
 const getUsersWithRoles = async (req, res) => {
   try {
+
     const result = await pool.query(`
+
       SELECT
-        u.id_user, u.username, u.email, u.is_active, u.is_verified,
-        ARRAY_AGG(r.role_name) AS roles
+
+          u.id_user,
+          u.username,
+          u.email,
+          u.is_active,
+          u.is_verified,
+
+          c.name,
+
+          m.photo_permission,
+          m.community_preference,
+          m.created_at,
+
+          ms.membership_type,
+          ms.start_date,
+          ms.end_date,
+          ms.status AS membership_status,
+
+          ARRAY_REMOVE(
+              ARRAY_AGG(DISTINCT r.role_name),
+              NULL
+          ) AS roles
+
       FROM auth.users u
-      LEFT JOIN auth.user_roles ur ON u.id_user = ur.id_user
-      LEFT JOIN auth.roles r ON ur.id_role = r.id_role
-      GROUP BY u.id_user, u.username, u.email, u.is_verified
+
+      LEFT JOIN auth.user_roles ur
+          ON ur.id_user = u.id_user
+
+      LEFT JOIN auth.roles r
+          ON r.id_role = ur.id_role
+
+      LEFT JOIN contacts.contacts c
+          ON c.id_contact = u.id_contact
+
+      LEFT JOIN membership.membership_forms m
+          ON m.id_contact = c.id_contact
+
+      LEFT JOIN membership.memberships ms
+          ON ms.id_contact = c.id_contact
+          AND ms.status = 'active'
+
+      GROUP BY
+
+          u.id_user,
+          u.username,
+          u.email,
+          u.is_active,
+          u.is_verified,
+
+          c.name,
+
+          m.photo_permission,
+          m.community_preference,
+          m.created_at,
+
+          ms.membership_type,
+          ms.start_date,
+          ms.end_date,
+          ms.status
+
       ORDER BY u.id_user DESC
+
     `);
 
     res.json(result.rows);
+
   } catch (err) {
+
     console.error('Error getting users:', err);
-    res.status(500).json({ error: 'Failed to load users' });
+
+    res.status(500).json({
+      error: 'Failed to load users'
+    });
+
   }
 };
 
@@ -161,11 +224,30 @@ const paymentHistoryResult = await pool.query(
         const paymentHistory =
         paymentHistoryResult.rows;
 
+    const paymentMembershipsResult = await pool.query(
+            `
+            SELECT
+            membership_type,
+            start_date,
+            end_date,
+            status AS membership_status
+            FROM membership.memberships
+            WHERE id_contact=$1
+
+            `,
+            [user.id_contact]
+            );
+
+            const paymentMemberships =
+            paymentMembershipsResult.rows;
+
+
     console.log(JSON.stringify({
       user,
       membership,
       payment,
-      paymentHistory
+      paymentHistory,
+      paymentMemberships
     }, null, 2));
 
     // 3. Devolver todo
@@ -183,7 +265,8 @@ const paymentHistoryResult = await pool.query(
       job_roles, // ✅ devuelto como array de números
       membership,
       payment,
-      paymentHistory
+      paymentHistory,
+      paymentMemberships
     });
 
 

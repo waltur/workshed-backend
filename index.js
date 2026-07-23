@@ -95,3 +95,7 @@ app.use('/api/upload', uploadImages);
 const paypalRoutes = require('./routes/payPal/paypal');
 
 app.use('/api/paypal', paypalRoutes);
+
+const reportsRoutes = require('./routes/reports/reports');
+
+app.use('/api/reports', reportsRoutes);

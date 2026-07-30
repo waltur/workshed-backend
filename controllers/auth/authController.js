@@ -113,6 +113,7 @@ const register = async (req, res) => {
 
     const id_contact = contactResult.rows[0].id_contact;
 
+
     //--------------------------------------------------
     // MEMBERSHIP FORM
     //--------------------------------------------------
@@ -236,7 +237,130 @@ const register = async (req, res) => {
       }
 
     }
+        //--------------------------------------------------
+        //VOUNTEER PROFILE
+        //--------------------------------------------------
+        if (hasVolunteerRole){
+        await client.query(
+        `
+        INSERT INTO volunteers.volunteer_profiles
+        (
+            id_contact,
+            occupation,
+            organisation,
+            languages,
+            own_vehicle,
+            medical_conditions,
+            volunteer_experience,
+            emergency_notes,
+            additional_information
+        )
+        VALUES
+        (
+            $1,$2,$3,$4,$5,$6,$7,$8,$9
+        )
+        `,
+        [
+            id_contact,
+            req.body.occupation,
+            req.body.organisation,
+            req.body.languages,
+            req.body.own_vehicle,
+            req.body.medical_conditions,
+            req.body.volunteer_experience,
+            req.body.emergency_notes,
+            req.body.additional_information
+        ]
+        );
+       }
+       //interests
+    if (req.body.interests?.length) {
 
+        for (const interestId of req.body.interests) {
+
+            await client.query(
+            `
+            INSERT INTO volunteers.contact_interests
+            (
+                id_contact,
+                id_interest
+            )
+            VALUES ($1,$2)
+            `,
+            [
+                id_contact,
+                interestId
+            ]);
+
+        }
+
+    }
+    //skill
+    if (req.body.skills?.length) {
+
+        for (const skillId of req.body.skills) {
+
+            await client.query(
+            `
+            INSERT INTO volunteers.contact_skills
+            (
+                id_contact,
+                id_skill
+            )
+            VALUES ($1,$2)
+            `,
+            [
+                id_contact,
+                skillId
+            ]);
+
+        }
+
+    }
+    //certification
+    if (req.body.certifications?.length) {
+
+        for (const certificationId of req.body.certifications) {
+
+            await client.query(
+            `
+            INSERT INTO volunteers.contact_certifications
+            (
+                id_contact,
+                id_certification
+            )
+            VALUES ($1,$2)
+            `,
+            [
+                id_contact,
+                certificationId
+            ]);
+
+        }
+
+    }
+    //hability
+    if (req.body.availability?.length) {
+
+        for (const availabilityId of req.body.availability) {
+
+            await client.query(
+            `
+            INSERT INTO volunteers.contact_availability
+            (
+                id_contact,
+                id_availability
+            )
+            VALUES ($1,$2)
+            `,
+            [
+                id_contact,
+                availabilityId
+            ]);
+
+        }
+
+    }
     //--------------------------------------------------
     // SAVE PAYMENT
     //--------------------------------------------------

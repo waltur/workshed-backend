@@ -53,7 +53,7 @@ app.use('/uploads/news', express.static(path.join(__dirname, '../public/uploads/
 app.use('/uploads/photos', express.static(path.join(__dirname, '../public/uploads/photos')));
 
 
-const volunteerRoutes = require('./routes/volunteers/index');
+const volunteerRoutes = require('./routes/volunteers/volunteers');
 app.use('/api/volunteers', volunteerRoutes);
 
 const contactRoutes = require('./routes/contacts/contacts');

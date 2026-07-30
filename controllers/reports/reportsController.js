@@ -10,7 +10,7 @@ const getMembersReport = async (req, res) => {
 
         const summaryResult = await pool.query(`
 
-        WITH payments_summary AS (
+ WITH  payments_summary AS (
 
             SELECT
                 id_contact,
@@ -56,126 +56,319 @@ const getMembersReport = async (req, res) => {
 
             SUM(CASE WHEN u.is_verified THEN 1 ELSE 0 END) AS verified_members,
 
-            COALESCE(SUM(rs.volunteer),0) AS volunteers,
 
-            COALESCE(SUM(ps.paid_member),0) AS paid_members,
+                COALESCE(SUM(rs.volunteer),0) AS volunteers,
 
-            COALESCE(SUM(fs.wants_to_volunteer),0) AS wants_to_volunteer,
+                COALESCE(SUM(ps.paid_member),0) AS paid_members,
 
-            COALESCE(SUM(fs.photo_permission),0) AS photo_permission,
+                COALESCE(SUM(fs.wants_to_volunteer),0) AS wants_to_volunteer,
 
-            COALESCE(SUM(fs.newsletter_member),0) AS newsletter_members,
+                COALESCE(SUM(fs.photo_permission),0) AS photo_permission,
 
-            COALESCE(SUM(fs.whatsapp_member),0) AS whatsapp_members,
+                COALESCE(SUM(fs.newsletter_member),0) AS newsletter_members,
 
-            COALESCE(SUM(ps.membership_revenue),0) AS membership_revenue
+                COALESCE(SUM(fs.whatsapp_member),0) AS whatsapp_members,
 
-        FROM auth.users u
+                COALESCE(SUM(ps.membership_revenue),0) AS membership_revenue,
 
-        LEFT JOIN payments_summary ps
-            ON ps.id_contact = u.id_contact
+                (
+                    SELECT COUNT(*)
+                    FROM volunteers.volunteer_profiles
+                    WHERE own_vehicle = true
+                ) AS vehicle_owners,
 
-        LEFT JOIN roles_summary rs
-            ON rs.id_user = u.id_user
+                (
+                    SELECT COUNT(*)
+                    FROM volunteers.contact_skills
+                ) AS total_skills,
 
-        LEFT JOIN forms_summary fs
-            ON fs.id_contact = u.id_contact;
+                (
+                    SELECT COUNT(*)
+                    FROM volunteers.contact_interests
+                ) AS total_interests,
 
+                (
+                    SELECT COUNT(*)
+                    FROM volunteers.contact_certifications
+                ) AS total_certifications,
+
+                (
+                    SELECT COUNT(DISTINCT id_contact)
+                    FROM volunteers.contact_availability
+                ) AS volunteers_with_availability,
+
+                (
+                    SELECT COUNT(*)
+                    FROM membership.memberships
+                    WHERE status='active'
+                ) AS active_memberships,
+
+                (
+                    SELECT COUNT(*)
+                    FROM membership.memberships
+                    WHERE status='expired'
+                ) AS expired_memberships
+
+            FROM auth.users u
+
+            LEFT JOIN payments_summary ps
+                ON ps.id_contact=u.id_contact
+
+            LEFT JOIN roles_summary rs
+                ON rs.id_user=u.id_user
+
+            LEFT JOIN forms_summary fs
+                ON fs.id_contact=u.id_contact;
         `);
 
         //------------------------------------------------------
         // MEMBERS
         //------------------------------------------------------
 
-        const membersResult = await pool.query(`
+const membersResult = await pool.query(`
 
-            SELECT
+WITH skills AS (
 
-                u.id_user,
-                c.name,
-                u.username,
-                u.email,
-                c.phone_number,
-                c.photo_url,
-                u.is_active,
-                u.is_verified,
+    SELECT
 
-                ARRAY_REMOVE(
-                    ARRAY_AGG(DISTINCT r.role_name),
-                    NULL
-                ) AS roles,
+        cs.id_contact,
 
-                MAX(p.payment_status) AS payment_status,
+        ARRAY_REMOVE(
+            ARRAY_AGG(DISTINCT vs.skill_name),
+            NULL
+        ) AS skills
 
-                MAX(p.amount) AS membership_amount,
+    FROM volunteers.contact_skills cs
 
-                MAX(p.currency) AS currency,
+    INNER JOIN volunteers.volunteer_skills vs
+        ON vs.id_skill = cs.id_skill
 
-                MAX(p.paid_at) AS paid_at,
+    GROUP BY cs.id_contact
 
-                MAX(m.start_date) AS membership_start,
+),
 
-                MAX(m.end_date) AS membership_end,
+interests AS (
 
-                MAX(m.status) AS membership_status
-                ,
+    SELECT
 
-                COUNT(DISTINCT CASE
-                    WHEN mf.wants_to_volunteer
-                    THEN u.id_user
-                END) AS wants_to_volunteer,
+        ci.id_contact,
 
-                COUNT(DISTINCT CASE
-                    WHEN mf.photo_permission
-                    THEN u.id_user
-                END) AS photo_permission,
+        ARRAY_REMOVE(
+            ARRAY_AGG(DISTINCT vi.interest_name),
+            NULL
+        ) AS interests
 
-                COUNT(DISTINCT CASE
-                    WHEN mf.community_preference='Newsletter'
-                    THEN u.id_user
-                END) AS newsletter_members,
+    FROM volunteers.contact_interests ci
 
-                COUNT(DISTINCT CASE
-                    WHEN mf.community_preference='WhatsApp'
-                    THEN u.id_user
-                END) AS whatsapp_members
+    INNER JOIN volunteers.volunteer_interests vi
+        ON vi.id_interest = ci.id_interest
 
-            FROM auth.users u
+    GROUP BY ci.id_contact
 
-            LEFT JOIN contacts.contacts c
-                ON c.id_contact = u.id_contact
+),
 
-            LEFT JOIN auth.user_roles ur
-                ON ur.id_user = u.id_user
+certifications AS (
 
-            LEFT JOIN auth.roles r
-                ON r.id_role = ur.id_role
+    SELECT
 
-            LEFT JOIN membership.payments p
-                ON p.id_contact = u.id_contact
+        cc.id_contact,
 
-            LEFT JOIN membership.memberships m
-            ON m.id_contact = u.id_contact
-            AND m.status = 'active'
+        ARRAY_REMOVE(
+            ARRAY_AGG(DISTINCT vc.certification_name),
+            NULL
+        ) AS certifications
 
-            LEFT JOIN membership.membership_forms mf
-            ON mf.id_contact=u.id_contact
+    FROM volunteers.contact_certifications cc
 
-            GROUP BY
+    INNER JOIN volunteers.volunteer_certifications vc
+        ON vc.id_certification = cc.id_certification
 
-                u.id_user,
-                u.username,
-                u.email,
-                u.is_active,
-                u.is_verified,
-                c.name,
-                c.phone_number,
-                c.photo_url
+    GROUP BY cc.id_contact
 
-            ORDER BY c.name ASC;
+),
 
-        `);
+availability AS (
 
+    SELECT
+
+        ca.id_contact,
+
+        ARRAY_REMOVE(
+            ARRAY_AGG(DISTINCT at.availability_name),
+            NULL
+        ) AS availability
+
+    FROM volunteers.contact_availability ca
+
+    INNER JOIN volunteers.availability_types at
+        ON at.id_availability = ca.id_availability
+
+    GROUP BY ca.id_contact
+
+)
+
+SELECT
+
+    u.id_user,
+
+    c.name,
+
+    u.username,
+
+    u.email,
+
+    c.phone_number,
+
+    c.photo_url,
+
+    u.is_active,
+
+    u.is_verified,
+
+    vp.occupation,
+
+    vp.organisation,
+
+    vp.languages,
+
+    vp.own_vehicle,
+
+    vp.volunteer_experience,
+
+    vp.medical_conditions,
+
+    vp.emergency_notes,
+
+    vp.additional_information,
+
+    COALESCE(sk.skills,'{}') AS skills,
+
+    COALESCE(i.interests,'{}') AS interests,
+
+    COALESCE(ct.certifications,'{}') AS certifications,
+
+    COALESCE(av.availability,'{}') AS availability,
+
+    ARRAY_REMOVE(
+        ARRAY_AGG(DISTINCT r.role_name),
+        NULL
+    ) AS roles,
+
+    MAX(p.payment_status) AS payment_status,
+
+    MAX(p.amount) AS membership_amount,
+
+    MAX(p.currency) AS currency,
+
+    MAX(p.paid_at) AS paid_at,
+
+    MAX(m.start_date) AS membership_start,
+
+    MAX(m.end_date) AS membership_end,
+
+    MAX(m.status) AS membership_status,
+
+    COUNT(DISTINCT CASE
+        WHEN mf.wants_to_volunteer
+        THEN u.id_user
+    END) AS wants_to_volunteer,
+
+    COUNT(DISTINCT CASE
+        WHEN mf.photo_permission
+        THEN u.id_user
+    END) AS photo_permission,
+
+    COUNT(DISTINCT CASE
+        WHEN mf.community_preference='Newsletter'
+        THEN u.id_user
+    END) AS newsletter_members,
+
+    COUNT(DISTINCT CASE
+        WHEN mf.community_preference='WhatsApp'
+        THEN u.id_user
+    END) AS whatsapp_members
+
+FROM auth.users u
+
+LEFT JOIN contacts.contacts c
+    ON c.id_contact = u.id_contact
+
+LEFT JOIN auth.user_roles ur
+    ON ur.id_user = u.id_user
+
+LEFT JOIN auth.roles r
+    ON r.id_role = ur.id_role
+
+LEFT JOIN membership.payments p
+    ON p.id_contact = u.id_contact
+
+LEFT JOIN membership.memberships m
+    ON m.id_contact = u.id_contact
+    AND m.status = 'active'
+
+LEFT JOIN membership.membership_forms mf
+    ON mf.id_contact = u.id_contact
+
+LEFT JOIN volunteers.volunteer_profiles vp
+    ON vp.id_contact = u.id_contact
+
+LEFT JOIN skills sk
+    ON sk.id_contact = u.id_contact
+
+LEFT JOIN interests i
+    ON i.id_contact = u.id_contact
+
+LEFT JOIN certifications ct
+    ON ct.id_contact = u.id_contact
+
+LEFT JOIN availability av
+    ON av.id_contact = u.id_contact
+
+GROUP BY
+
+    u.id_user,
+
+    c.name,
+
+    u.username,
+
+    u.email,
+
+    c.phone_number,
+
+    c.photo_url,
+
+    u.is_active,
+
+    u.is_verified,
+
+    vp.occupation,
+
+    vp.organisation,
+
+    vp.languages,
+
+    vp.own_vehicle,
+
+    vp.volunteer_experience,
+
+    vp.medical_conditions,
+
+    vp.emergency_notes,
+
+    vp.additional_information,
+
+    sk.skills,
+
+    i.interests,
+
+    ct.certifications,
+
+    av.availability
+
+ORDER BY c.name ASC;
+
+`);
         //------------------------------------------------------
         // AGE DISTRIBUTION
         //------------------------------------------------------

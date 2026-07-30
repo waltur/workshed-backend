@@ -1,47 +1,105 @@
 const pool = require('../../db');
 
-// Obtener todos los voluntarios
-const getAllVolunteers = async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM volunteers.volunteers');
-    res.json(result.rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to retrieve volunteers' });
-  }
+const getVolunteerCatalogs = async (req,res)=>{
+
+    try{
+
+        const interests=await pool.query(`
+            SELECT
+                id_interest,
+                interest_name
+            FROM volunteers.volunteer_interests
+            WHERE active=true
+            ORDER BY interest_name
+        `);
+
+        const skills=await pool.query(`
+            SELECT
+                id_skill,
+                skill_name
+            FROM volunteers.volunteer_skills
+            WHERE active=true
+            ORDER BY skill_name
+        `);
+
+        const certifications=await pool.query(`
+            SELECT
+                id_certification,
+                certification_name
+            FROM volunteers.volunteer_certifications
+            WHERE active=true
+            ORDER BY certification_name
+        `);
+
+        const availability=await pool.query(`
+            SELECT
+                id_availability,
+                availability_name
+            FROM volunteers.availability_types
+            ORDER BY id_availability
+        `);
+
+        res.json({
+
+            interests:interests.rows,
+
+            skills:skills.rows,
+
+            certifications:certifications.rows,
+
+            availability:availability.rows
+
+        });
+
+    }catch(err){
+
+        console.error(err);
+
+        res.status(500).json({
+
+            error:'Unable to load volunteer catalogs.'
+
+        });
+
+    }
+
 };
 
-// Crear nuevo voluntario
-const createVolunteer = async (req, res) => {
-  const {
-    id_contact,
-    role,
-    skills,
-    availability,
-    status,
-    startDate,
-    endDate,
-    backgroundCheck,
-    notes,
-  } = req.body;
+const getAvailabilityTypes = async (req, res) => {
 
-  try {
-    const result = await pool.query(
-      `INSERT INTO volunteers.volunteers
-      (id_contact, role, skills, availability, status, start_date, end_date, background_check, notes)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING *`,
-      [id_contact, role, skills, availability, status, startDate, endDate, backgroundCheck, notes]
-    );
+    try{
 
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to create volunteer' });
-  }
+        const result = await pool.query(`
+
+            SELECT
+
+                id_availability,
+                availability_name
+
+            FROM volunteers.availability_types
+
+            ORDER BY id_availability;
+
+        `);
+
+        res.json(result.rows);
+
+    }catch(err){
+
+        console.error(err);
+
+        res.status(500).json({
+
+            error:'Unable to load availability types.'
+
+        });
+
+    }
+
 };
 
-module.exports = {
-  getAllVolunteers,
-  createVolunteer,
+module.exports={
+
+    getVolunteerCatalogs, getAvailabilityTypes
+
 };

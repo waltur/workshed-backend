@@ -1,0 +1,120 @@
+const pool = require('../../db');
+
+const getMembershipStatus = async (req, res) => {
+console.log('getMembershipStatus');
+  try {
+
+    const id_contact = req.user.contact_id;
+
+    if (!id_contact) {
+
+      return res.status(400).json({
+        error: 'Contact ID not found.'
+      });
+
+    }
+
+    const result = await pool.query(
+      `
+      SELECT
+
+        m.id_membership,
+        m.id_contact,
+        m.id_payment,
+        m.membership_type,
+        m.start_date,
+        m.end_date,
+        m.status,
+
+        p.amount,
+        p.currency,
+        p.payment_status,
+        p.payment_method,
+        p.payment_provider,
+        p.paid_at,
+        p.paypal_order_id,
+        p.paypal_capture_id
+
+      FROM membership.memberships m
+
+      LEFT JOIN membership.payments p
+        ON p.id_payment = m.id_payment
+
+      WHERE m.id_contact = $1
+
+      ORDER BY m.end_date DESC
+
+      LIMIT 1
+      `,
+      [id_contact]
+    );
+
+    // ============================================
+    // NO MEMBERSHIP
+    // ============================================
+
+    if (result.rows.length === 0) {
+
+      return res.json({
+
+        hasMembership: false,
+
+        isActive: false,
+
+        membership: null
+
+      });
+
+    }
+
+    const membership = result.rows[0];
+
+    // ============================================
+    // CHECK EXPIRATION
+    // ============================================
+
+    const today = new Date();
+
+    const endDate = new Date(
+      membership.end_date
+    );
+
+    const isActive =
+      membership.status === 'active' &&
+      endDate >= today;
+
+    // ============================================
+    // RESPONSE
+    // ============================================
+
+    res.json({
+
+      hasMembership: true,
+
+      isActive,
+
+      membership
+
+    });
+
+  }
+  catch (err) {
+
+    console.error(
+      'Error getting membership status:',
+      err
+    );
+
+    res.status(500).json({
+
+      error: 'Unable to get membership status.'
+
+    });
+
+  }
+
+};
+
+module.exports = {
+  getMembershipStatus
+};

@@ -100,3 +100,12 @@ app.use('/api/reports', reportsRoutes);
 
 const catalogRoutes = require('./routes/catalogs/catalogs');
 app.use('/api/catalogs', catalogRoutes);
+
+const membershipRoutes = require('./routes/membership/membership');
+app.use('/api/membership', membershipRoutes);
+
+const documentRoutes = require('./routes/documents/document');
+app.use('/api/documents',documentRoutes);
+
+const documentFolderRoutes = require('./routes/documents/documentFolder');
+app.use('/api/document-folders', documentFolderRoutes);

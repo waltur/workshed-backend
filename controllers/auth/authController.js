@@ -131,10 +131,11 @@ const register = async (req, res) => {
         acknowledged_privacy,
         acknowledged_code_of_conduct,
         acknowledged_health_safety,
-        volunteer_acknowledgement
+        volunteer_acknowledgement,
+        volunteer_agreement
       )
       VALUES
-      ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
       `,
       [
         id_contact,
@@ -145,8 +146,9 @@ const register = async (req, res) => {
         req.body.accept_membership_policy,
         req.body.accept_privacy_full,
         req.body.accept_code_full,
-        req.body.accept_health_full,
-        req.body.volunteer_acknowledgement || null
+        req.body.accept_health_full ,
+        req.body.volunteer_acknowledgement || null,
+        req.body.volunteer_agreement,
       ]
     );
 
@@ -175,7 +177,7 @@ const register = async (req, res) => {
         email,
         hash,
         id_contact,
-        true
+        1
       ]
     );
 
@@ -405,48 +407,50 @@ const register = async (req, res) => {
 
       id_payment = paymentResult.rows[0].id_payment;
 
+         //--------------------------------------------------
+          // CREATE MEMBERSHIP
+          //--------------------------------------------------
+
+          const startDate = new Date();
+
+          const endDate = new Date(startDate);
+
+          endDate.setFullYear(
+              endDate.getFullYear() + 1
+          );
+
+          await client.query(
+          `
+          INSERT INTO membership.memberships
+          (
+              id_contact,
+              id_payment,
+              membership_type,
+              start_date,
+              end_date,
+              status
+          )
+          VALUES
+          (
+              $1,
+              $2,
+              'Annual',
+              $3,
+              $4,
+              'active'
+          )
+          `,
+          [
+              id_contact,
+              id_payment,
+              startDate,
+              endDate
+          ]
+          );
+          //--------------------------------------------------
+
     }
-    //--------------------------------------------------
-    // CREATE MEMBERSHIP
-    //--------------------------------------------------
 
-    const startDate = new Date();
-
-    const endDate = new Date(startDate);
-
-    endDate.setFullYear(
-        endDate.getFullYear() + 1
-    );
-
-    await client.query(
-    `
-    INSERT INTO membership.memberships
-    (
-        id_contact,
-        id_payment,
-        membership_type,
-        start_date,
-        end_date,
-        status
-    )
-    VALUES
-    (
-        $1,
-        $2,
-        'Annual',
-        $3,
-        $4,
-        'active'
-    )
-    `,
-    [
-        id_contact,
-        id_payment,
-        startDate,
-        endDate
-    ]
-    );
-    //--------------------------------------------------
 
     await client.query('COMMIT');
 

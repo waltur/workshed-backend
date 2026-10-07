@@ -19,7 +19,8 @@ const fs = require('fs');
 const register = async (req, res) => {
 
   const {
-    name,
+    first_name,
+    last_name,
     phone_number,
     email,
     username,
@@ -90,7 +91,8 @@ const register = async (req, res) => {
       `
       INSERT INTO contacts.contacts
       (
-        name,
+       gi first_name,
+        last_name,
         email,
         phone_number,
         type,
@@ -98,11 +100,12 @@ const register = async (req, res) => {
         emergency_contact
       )
       VALUES
-      ($1,$2,$3,$4,$5,$6)
+      ($1,$2,$3,$4,$5,$6,$7)
       RETURNING id_contact
       `,
       [
-        name,
+        first_name,
+        last_name,
         email,
         phone_number,
         'Person',
